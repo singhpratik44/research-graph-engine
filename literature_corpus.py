@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
-Literature corpus — 20 studies (Apr-Jul 2026, two survey rounds) surveyed to
-decide what this repo should build next, entered as real graph data instead
-of a memo.
+Literature corpus — 29 studies (Apr-Jul 2026, three survey rounds) surveyed
+to decide what this repo should build next, entered as real graph data
+instead of a memo.
+
+Round 3 folds in the quantum-workflow engineering papers independently
+verified during the QIH stress-test fact-check (see qih_stress_corpus.py):
+real, peer-reviewed/preprint papers about quantum-HPC middleware,
+scheduling, and closed-loop co-design that are genuinely relevant to this
+repo's own orchestrator/task_graph architecture -- unlike the "QIH
+relevance" analogies bolted onto them in their source document, which that
+fact-check found unsupported and did not carry over here.
 
 Each paper PRODUCES one CLAIM capturing why it's relevant to this engine, and
 that claim ADDRESSES one of the five capability GAPs the survey turned up:
@@ -330,6 +338,125 @@ PAPERS = [
         relation="reinforces",
         object="the need for behavioral, not just outcome, review auditing",
         gap="gap_multidim_review",
+    ),
+
+    # -- Round 3 (quantum-workflow papers, verified during the QIH fact-check) --
+    dict(
+        id="paper_2601_15521",
+        title="NWQWorkflow: The Northwest Quantum Workflow",
+        url="https://arxiv.org/abs/2601.15521",
+        published="2026-01",
+        claim="Closed-loop co-design across an entire pipeline (programming, compilation, "
+              "error correction, benchmarking, execution) is what a diagnose-and-retarget "
+              "recovery loop actually looks like end to end, not just a single retry step.",
+        subject="closed-loop software-hardware co-design",
+        relation="models",
+        object="the adaptive recovery loop WorkerSpawner.admit() and Scheduler both lack",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_2412_18519",
+        title="Pilot-Quantum: A Quantum-HPC Middleware for Resource, Workload and Task Management",
+        url="https://arxiv.org/abs/2412.18519",
+        published="2024-12",
+        claim="A pilot-job abstraction that manages resource allocation and retries at scale "
+              "is exactly the layer task_graph.Scheduler doesn't have yet -- it only marks a "
+              "failed task's dependents SKIPPED, never retries them.",
+        subject="pilot-job resource/retry management",
+        relation="suggests",
+        object="a resource-and-retry abstraction layer above Scheduler",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_2412_01173",
+        title="Programming Variational Quantum Circuits with Quantum-Train Agent",
+        url="https://arxiv.org/abs/2412.01173",
+        published="2024-12",
+        claim="An LLM proposes a circuit ansatz and the quantum device validates it "
+              "empirically -- a concrete two-role propose/validate loop, not a single "
+              "scalar pass/fail verdict.",
+        subject="propose/validate agent loop",
+        relation="reinforces",
+        object="the case for a reviewer/judge role distinct from the extractor",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_2509_01812",
+        title="Quantum Machine Learning for UAV Swarm Intrusion Detection",
+        url="https://arxiv.org/abs/2509.01812",
+        published="2025-09",
+        claim="Federated agents that share only aggregate results, never raw data, is a "
+              "template for how a retry loop could exchange minimal diagnostic information "
+              "instead of re-running a full extraction from scratch.",
+        subject="federated minimal-diagnostic sharing",
+        relation="suggests",
+        object="a lighter-weight diagnostic handoff for retried extraction jobs",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_2403_05828",
+        title="Multi-GPU-Enabled Hybrid Quantum-Classical Workflow in Quantum-HPC Middleware",
+        url="https://arxiv.org/abs/2403.05828",
+        published="2024-03",
+        claim="State preparation, circuit execution, and classification are three distinct "
+              "specialist components chained into one pipeline -- a real precedent for "
+              "splitting extraction into bounded specialist roles.",
+        subject="a three-component specialist pipeline (VQE / tensor network / QCNN)",
+        relation="parallels",
+        object="the queued specialist agent split (extractor/checker/validator/reviewer)",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_2505_24765",
+        title="Supervised Quantum Machine Learning: A Future Outlook from Qubits to Enterprise Applications",
+        url="https://arxiv.org/abs/2505.24765",
+        published="2025-06",
+        claim="Quantum advantage is problem-specific, not universal -- arguing for auditing "
+              "and scoring per problem class rather than a single verdict, the same "
+              "multi-dimensional shape review decisions need.",
+        subject="problem-specific advantage auditing",
+        relation="reinforces",
+        object="multi-dimensional review over a single scalar confidence",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_2507_03540",
+        title="A Survey on Integrating Quantum Computers into High Performance Computing Systems",
+        url="https://arxiv.org/abs/2507.03540",
+        published="2025-07",
+        claim="Distinguishing loosely-coupled, tightly-coupled, and heterogeneous "
+              "integration patterns requires typed relationships between components, "
+              "not one flat edge type.",
+        subject="typed integration-pattern relationships",
+        relation="reinforces",
+        object="the case for typed EdgeType values beyond a flat PRODUCES/CITES",
+        gap="gap_typed_provenance_edges",
+    ),
+    dict(
+        id="paper_2408_13687",
+        title="Quantum error correction below the surface code threshold",
+        url="https://arxiv.org/abs/2408.13687",
+        published="2024-12",
+        claim="Below-threshold error correction means the system gets more reliable by "
+              "adding structured redundancy and correction capacity -- a real precedent "
+              "for building retry-with-diagnosis into the gate rather than a flat reject.",
+        subject="below-threshold structured error correction",
+        relation="suggests",
+        object="retry-with-diagnosis as the gate's failure mode, not a flat reject",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_ibm_ftqc_roadmap",
+        title="IBM Lays Out Clear Path to Fault-Tolerant Quantum Computing",
+        url="https://www.ibm.com/quantum/blog/large-scale-ftqc",
+        published="2025 (roadmap, updated 2026)",
+        claim="Modular qubit interconnects (couplers) linking chips is explicitly a typed "
+              "relationship between components -- entanglement geometry between modules, "
+              "not an undifferentiated link.",
+        subject="modular interconnects as typed cross-module relationships",
+        relation="reinforces",
+        object="typed EdgeType values for cross-node relationships",
+        gap="gap_typed_provenance_edges",
     ),
 ]
 

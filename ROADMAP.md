@@ -82,6 +82,22 @@ moves to the next item after `make validate` is green and a human has merged.
       `_check_provenance_present` only checks a `source_paper` field is
       non-empty. Add a real entailment/verification check and a new
       `GateReasonCode` (e.g. `CLAIM_NOT_ENTAILED`).
+
+      **Concrete real-world case that motivates this** (from
+      `qih_stress_corpus.py`'s fact-check, not hypothetical): QIH's central
+      claim ("light angle distributions derive Einstein's field equations")
+      cites two real, correctly-formatted sources — but neither one, on
+      inspection, actually addresses the specific mechanism claimed. Today's
+      gate can't catch that: `_check_provenance_present` only asks "is
+      `source_paper` non-empty," so a claim with a real-looking but
+      non-supporting citation passes that check identically to a claim whose
+      citation genuinely backs it. The only reason
+      `claim_light_angle_derives_gr` is held in the stress corpus is its
+      *confidence* (0.08, assigned by hand after independent research) —
+      nothing in the gate itself would have caught a citation mismatch on
+      its own. That's exactly the check this backlog item needs to add:
+      verify a claim is *entailed by* its cited source, not merely that a
+      `source_paper` field is populated.
 - [ ] Adaptive recovery loop for `WorkerSpawner.admit()` (`gap_adaptive_recovery`,
       2 papers) and for `Scheduler` (a failed task's dependents are currently
       SKIPPED, never retried). A rejected envelope/failed task should support

@@ -2,7 +2,7 @@
 """
 Test suite for graph_roadmap.py: the rollup answering gap_roadmap_queries from
 literature_corpus.py itself -- proving the survey's own most-cited gap
-(multi-dimensional review, 9 papers across two survey rounds) surfaces correctly.
+(multi-dimensional review, 12 papers across three survey rounds) surfaces correctly.
 """
 
 import unittest
@@ -30,7 +30,7 @@ class TestRoadmapSummary(unittest.TestCase):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
         top = rows[0]
         self.assertEqual(top["id"], "gap_multidim_review")
-        self.assertEqual(top["paper_count"], 9)
+        self.assertEqual(top["paper_count"], 12)
 
     def test_roadmap_queries_gap_has_exactly_its_own_paper(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
@@ -40,10 +40,11 @@ class TestRoadmapSummary(unittest.TestCase):
                                            "The Scientific Contribution Graph: "
                                            "Automated Literature-based Technological Roadmapping at Scale")])
 
-    def test_newest_gap_has_two_papers(self):
+    def test_adaptive_recovery_gap_grew_with_round_three(self):
+        # 2 papers in round 2, +4 quantum-workflow papers in round 3.
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
         row = next(r for r in rows if r["id"] == "gap_adaptive_recovery")
-        self.assertEqual(row["paper_count"], 2)
+        self.assertEqual(row["paper_count"], 6)
 
     def test_attribution_walks_claim_back_to_producing_paper(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
@@ -70,7 +71,7 @@ class TestFullRoadmap(unittest.TestCase):
 class TestRenderRoadmapReport(unittest.TestCase):
     def test_report_mentions_top_gap_and_its_count(self):
         report = roadmap.render_roadmap_report(corpus.build_corpus_graph())
-        self.assertIn("[9] gap_multidim_review", report)
+        self.assertIn("[12] gap_multidim_review", report)
 
     def test_report_on_empty_graph_says_so(self):
         report = roadmap.render_roadmap_report(gf.build_fixture_graph())
