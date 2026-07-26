@@ -136,7 +136,12 @@ moves to the next item after `make validate` is green and a human has merged.
       has a stable public API. Revisit if either publishes a feed.
 - [ ] Re-run `arxiv_ingest.py` for real once `export.arxiv.org` is reachable
       from wherever this repo is being worked on (blocked by this session's
-      egress policy when last attempted).
+      egress policy when last attempted). Re-confirmed 2026-07-26: live call
+      to `export.arxiv.org/api/query` still gets `403 Forbidden` at the
+      proxy tunnel before any request reaches arXiv — the proxy's egress
+      allowlist (`selective: false`) does not include `export.arxiv.org`.
+      Same failure mode as before, no new information; do not retry until
+      this environment's egress policy changes.
 
 ## Rules for working an item
 
