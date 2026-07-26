@@ -62,7 +62,7 @@ import research_graph_gates as gates
 try:
     from task_graph import TaskSpan
 except ImportError:  # pragma: no cover -- task_graph is domain-agnostic; keep this soft
-    TaskSpan = None
+    TaskSpan = None  # type: ignore[assignment,misc]  # intentional soft-dependency fallback
 
 
 def _now() -> str:

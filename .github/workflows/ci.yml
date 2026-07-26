@@ -17,10 +17,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
 
       - name: make validate (tests + evals + conformance)
         run: make validate
+
+      - name: make typecheck (mypy)
+        run: make typecheck
 
       - name: make inspect
         run: make inspect

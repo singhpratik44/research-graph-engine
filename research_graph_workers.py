@@ -349,6 +349,7 @@ class WorkerSpawner:
         job = self.graph.index().get(directive.job_id)
         if job is None:
             raise KeyError(f"unknown job {directive.job_id!r} — spawn it first")
+        assert job.provenance is not None  # spawn() always sets one
 
         job.properties["worker_id"] = env.worker_id
         job.properties["completed_at"] = env.completed_at
@@ -416,7 +417,12 @@ class WorkerSpawner:
                                     for x in self.graph.conflicts)]
         self.graph.conflicts.extend(new_conflicts)
 
-        decision = self.gate.should_unlock_next_stage(job, self.graph)
+        # research_graph_gates.Node is a structurally-identical local stub (see
+        # its own module docstring) -- the gate is deliberately schema-agnostic
+        # and never imports research_graph_schema, so it type-checks against
+        # its own Node, not this one. Verified duck-typed by the full test
+        # suite; not a real type error.
+        decision = self.gate.should_unlock_next_stage(job, self.graph)  # type: ignore[arg-type]
         review = None
         if not decision.can_proceed:
             job.properties["status"] = JobStatus.HELD.value
@@ -475,6 +481,8 @@ class WorkerSpawner:
         job = next(n for n in self.graph.nodes
                    if n.type == NodeType.EXTRACTION_JOB.value
                    and n.properties.get("job_id") == task.properties["extraction_job_id"])
+        assert task.provenance is not None  # _open_review()/spawn() always set one
+        assert job.provenance is not None
 
         task.properties.update({
             "status": ReviewStatus.APPROVED.value,
@@ -496,11 +504,12 @@ class WorkerSpawner:
         job.provenance.human_reviewed = True
         job.provenance.review_notes = notes
         for n in self.graph.nodes:
-            if any(e.source == job.id and e.target == n.id
-                   and e.type == EdgeType.PRODUCES.value for e in self.graph.edges):
+            if (n.provenance is not None
+                    and any(e.source == job.id and e.target == n.id
+                            and e.type == EdgeType.PRODUCES.value for e in self.graph.edges)):
                 n.provenance.human_reviewed = True
 
-        decision = self.gate.should_unlock_next_stage(job, self.graph)
+        decision = self.gate.should_unlock_next_stage(job, self.graph)  # type: ignore[arg-type]
         job.properties["status"] = (JobStatus.APPROVED.value if decision.can_proceed
                                     else JobStatus.HELD.value)
         return decision
@@ -510,6 +519,7 @@ class WorkerSpawner:
         job = next(n for n in self.graph.nodes
                    if n.type == NodeType.EXTRACTION_JOB.value
                    and n.properties.get("job_id") == task.properties["extraction_job_id"])
+        assert task.provenance is not None  # _open_review()/spawn() always set one
         task.properties.update({"status": ReviewStatus.REJECTED.value,
                                 "reviewed_by": reviewed_by, "reviewed_at": _now(),
                                 "review_notes": notes})

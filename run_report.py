@@ -60,7 +60,7 @@ def files_changed(base: Optional[str] = None) -> List[str]:
     runs `git diff`/`git status`, never mutates the working tree.
     """
     base = base if base is not None else _merge_base()
-    changed = set()
+    changed: set = set()
     if base:
         diff = _run(["git", "diff", "--name-only", f"{base}...HEAD"])
         changed.update(f for f in diff.splitlines() if f)

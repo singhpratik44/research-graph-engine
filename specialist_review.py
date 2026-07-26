@@ -41,7 +41,7 @@ concurrently; reviewer_judge depends on both.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from research_graph_schema import (
     ExtractionType, Node, ResearchGraph, ValidationError,
@@ -210,7 +210,7 @@ def reconcile_and_admit(
     env: ResultEnvelope,
     schema_verdict: SpecialistVerdict,
     conflict_verdict: SpecialistVerdict,
-) -> (AdmissionResult, List[Node]):
+) -> Tuple[AdmissionResult, List[Node]]:
     """
     If the schema validator and conflict checker disagree on whether this
     batch is clean, record that disagreement in graph memory (advisory

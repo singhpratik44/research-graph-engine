@@ -89,11 +89,25 @@ class TestGitHelpers(unittest.TestCase):
         self.assertIsInstance(changed, list)
         self.assertTrue(all(isinstance(f, str) for f in changed))
 
-    def test_files_changed_includes_this_new_test_file(self):
-        # This file is uncommitted at the moment it's authored, so `git status
-        # --porcelain` must surface it regardless of the merge-base diff.
-        changed = rr.files_changed()
-        self.assertIn("test_run_report.py", changed)
+    def test_files_changed_surfaces_uncommitted_files_regardless_of_merge_base(self):
+        # Deterministic version of the "uncommitted files must surface" case --
+        # depending on a real file being uncommitted in the ambient repo state
+        # (as an earlier version of this test did, pinned to itself at the
+        # moment it was authored) breaks the instant that file gets committed,
+        # which isn't a real regression. Mock subprocess.run so this asserts
+        # the actual invariant: git status --porcelain output surfaces in
+        # files_changed() even when there's no merge-base diff at all.
+        def fake_run(cmd, **kwargs):
+            if cmd[:2] == ["git", "merge-base"]:
+                return type("R", (), {"stdout": ""})()
+            if cmd[:2] == ["git", "status"]:
+                return type("R", (), {"stdout": " M .gitignore\n?? new_file.py\n"})()
+            return type("R", (), {"stdout": ""})()
+
+        with patch.object(rr.subprocess, "run", side_effect=fake_run):
+            changed = rr.files_changed()
+        self.assertIn("new_file.py", changed)
+        self.assertIn(".gitignore", changed)
 
     def test_files_changed_does_not_mangle_dotfiles(self):
         # Regression: `git status --porcelain`'s first line starts with a
