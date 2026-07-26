@@ -92,7 +92,7 @@ moves to the next item after `make validate` is green and a human has merged.
 
 ## Next
 
-- [ ] Specialist agent split: extractor, conflict checker, schema
+- [x] Specialist agent split: extractor, conflict checker, schema
       validator, reviewer/judge — bounded specialists with explicit
       handoffs over the task DAG, not many freely-chatting agents. Now
       unblocked: DAG + traces (`task_graph.py`) and memory
@@ -102,6 +102,32 @@ moves to the next item after `make validate` is green and a human has merged.
       verdicts on one node is the multi-dimensional review the corpus's
       12 papers on this gap all argue for, replacing today's single
       scalar `ReviewStatus`/confidence.
+
+      Built as `specialist_review.py`: four bounded roles — extractor,
+      schema validator, conflict checker, reviewer/judge — run as an
+      explicit `task_graph.TaskDAG` (`extract` → `{conflict_check,
+      schema_validate}` in parallel → `reviewer_judge`), each producing an
+      independent, always-completed `SpecialistVerdict`, reconciled into
+      one `SpecialistPipelineReport`. `SpecialistVerdict` is deliberately
+      kept separate from `GateDecision.checks` — they answer different
+      questions (one short-circuited governing verdict vs. one bounded
+      role's independent read) — so `research_graph_gates.py` is
+      untouched. The schema-validator and conflict-checker roles wrap the
+      same pure functions (`validate_node`, `detect_conflicts_in_graph`)
+      `graph_orchestrator.py`'s docstring already credited to
+      `WorkerSpawner.admit()`, just surfaced as explicit verdicts instead
+      of an invisible re-check; `reconcile_and_admit` records a
+      `graph_memory.record_disagreement` when the two specialists
+      disagree, then calls the real, unchanged `admit()` unconditionally.
+      Purely additive: `research_graph_gates.py`,
+      `research_graph_workers.py`, `research_graph_schema.py`,
+      `task_graph.py`, `graph_memory.py`, and `graph_orchestrator.py` are
+      all unmodified. Closes all five original capability gaps
+      (`gap_typed_provenance_edges`, `gap_claim_source_verify`,
+      `gap_roadmap_queries`, `gap_adaptive_recovery`,
+      `gap_multidim_review`). Moving this to `## Done` and promoting the
+      next backlog item happens at merge time (rule 5 below), not on this
+      branch.
 
 ## Backlog (in order)
 

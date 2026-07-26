@@ -26,6 +26,7 @@ pass, and if a human waived one of those checks — who, and on what grounds.
 | Workers | `research_graph_workers.py` | `ExtractionDirective` in, `ResultEnvelope` out; `WorkerSpawner` is the only writer to the graph, and treats every worker as untrusted. `ReferenceWorker` extracts claims, concepts, and benchmarks (deliberately dumb heuristics — proving the loop closes, not extraction quality). `admit()` supports a bounded, audited retry (`retry_with`/`max_retries`, default off) instead of failing a rejected envelope wholesale |
 | Graph memory | `graph_memory.py` | The other legitimate writer besides workers: persists task outcomes, accepted/rejected claims, reviewer disagreements, blocked reasons, and repair patterns as typed `MEMORY_RECORD` nodes (`SUPPORTED_BY`/`REJECTED_BECAUSE`/`DISAGREED_ON`/`REPAIRED_VIA`/`DERIVED_FROM` edges) — structured graph data, not a flattened transcript |
 | Orchestrator | `graph_orchestrator.py` | Fan-out over one paper to the claim/concept/benchmark extractors, collected into one `OrchestrationReport` — schema validation, conflict detection, and the gate decision all still happen inside the *unchanged* `WorkerSpawner.admit()`, not duplicated here |
+| Specialist agent split | `specialist_review.py` | Four bounded roles (extractor, schema validator, conflict checker, reviewer/judge) run as an explicit `task_graph.TaskDAG` (`extract` → `{conflict_check, schema_validate}` in parallel → `reviewer_judge`), each an independent, always-completed `SpecialistVerdict`, reconciled into one `SpecialistPipelineReport` — multi-dimensional review instead of one scalar `ReviewStatus`/confidence, without touching the gate itself; disagreement between specialists is persisted via `graph_memory.record_disagreement` before the real, unchanged `WorkerSpawner.admit()` runs |
 | Conflict detection | `research_graph_schema.detect_conflicts_in_graph()` | Deterministic heuristics first — same subject/object, opposed relation |
 | Inspection | `graph_inspector.py` | Plain-text report: papers, claims, conflicts, jobs, held/review-required, and *why* a gate blocked each one (re-runs the live gate, not a cached string) |
 | Query layer | `graph_queries.py` | `get_node`, `neighbors`, `claims_for_paper`, `contradicting_claims`, `why_blocked`, `search`, `detect_job_dependency_cycles` — structured answers, not text to parse |
@@ -63,6 +64,10 @@ make evals               # == python3 graph_evals.py
 
 # fan a paper out to claim/concept/benchmark extraction, gated as normal
 python3 graph_orchestrator.py
+
+# run one paper through the four specialist roles (extractor, schema
+# validator, conflict checker, reviewer/judge) over a real concurrent DAG
+python3 specialist_review.py
 
 # see graph_memory.py's typed records over a real run (see its docstring for the API)
 python3 -c "import graph_memory"  # importable module, no standalone demo yet
