@@ -6,7 +6,7 @@ Implements should_unlock_next_stage() with explicit reason codes + structured tr
 """
 
 from dataclasses import dataclass, asdict, field
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Callable, Dict, List, Tuple, Optional, Any
 from enum import Enum
 from datetime import datetime
 import json
@@ -21,6 +21,7 @@ class GateReasonCode(Enum):
     ALLOWED_BY_WAIVER = "ALLOWED_BY_WAIVER"  # Advanced only because a human waived a gate
     SCHEMA_INVALID = "SCHEMA_INVALID"  # Required fields missing or malformed
     PROVENANCE_MISSING = "PROVENANCE_MISSING"  # No source information
+    CLAIM_NOT_ENTAILED = "CLAIM_NOT_ENTAILED"  # Claim text not supported by its cited source
     REVIEW_REQUIRED = "REVIEW_REQUIRED"  # Human approval needed
     LOW_CONFIDENCE = "LOW_CONFIDENCE"  # Confidence below threshold
     CONFLICT_UNRESOLVED = "CONFLICT_UNRESOLVED"  # Contradictory claims exist
@@ -125,7 +126,8 @@ class WorkflowGate:
         require_human_review: bool = True,
         detect_conflicts: bool = True,
         waiver_confidence_floor: float = 0.4,
-        honor_waivers: bool = True
+        honor_waivers: bool = True,
+        entailment_checker: Optional[Callable[["Node", Optional["ResearchGraph"]], bool]] = None,
     ):
         self.confidence_threshold = confidence_threshold
         self.require_human_review = require_human_review
@@ -134,6 +136,12 @@ class WorkflowGate:
         # Without a floor the confidence gate is decorative: anything can be waived past it.
         self.waiver_confidence_floor = waiver_confidence_floor
         self.honor_waivers = honor_waivers
+        # Pluggable claim-source verification (see claim_verification.py for a real,
+        # deterministic default implementation). `None` — the default, and the only
+        # mode every test written before this check existed exercises — makes
+        # _check_claim_entailed a no-op pass for every node, so existing behavior is
+        # unchanged unless a caller opts in explicitly.
+        self.entailment_checker = entailment_checker
         self.decisions: List[GateDecision] = []
 
     def should_unlock_next_stage(
@@ -142,7 +150,10 @@ class WorkflowGate:
         graph: Optional["ResearchGraph"] = None
     ) -> GateDecision:
         """
-        Core gate logic: five hard checks, deterministic verdicts.
+        Core gate logic: deterministic verdicts, one CheckTrace per check, run in
+        a fixed order (schema, provenance, claim-entailment, confidence, human
+        review, conflicts, downstream eligibility). Claim-entailment is a no-op
+        pass unless the gate was constructed with an `entailment_checker`.
 
         Returns: GateDecision with full trace
         """
@@ -177,57 +188,72 @@ class WorkflowGate:
             self.decisions.append(decision)
             return decision
 
-        # CHECK 3: Confidence above threshold
-        trace3 = self._check_confidence_above_threshold(node, graph)
+        # CHECK 3: Claim entailed by its cited source (claim nodes only; a no-op
+        # pass when no entailment_checker is configured -- see claim_verification.py)
+        trace3 = self._check_claim_entailed(node, graph)
         traces.append(trace3)
         if not trace3.passed:
             decision = GateDecision(
                 node_id=node.id,
                 can_proceed=False,
-                reason_code=GateReasonCode.LOW_CONFIDENCE,
+                reason_code=GateReasonCode.CLAIM_NOT_ENTAILED,
                 reason=trace3.reason,
                 checks=traces
             )
             self.decisions.append(decision)
             return decision
 
-        # CHECK 4: Human review state
-        trace4 = self._check_human_reviewed(node)
+        # CHECK 4: Confidence above threshold
+        trace4 = self._check_confidence_above_threshold(node, graph)
         traces.append(trace4)
         if not trace4.passed:
             decision = GateDecision(
                 node_id=node.id,
                 can_proceed=False,
-                reason_code=GateReasonCode.REVIEW_REQUIRED,
+                reason_code=GateReasonCode.LOW_CONFIDENCE,
                 reason=trace4.reason,
                 checks=traces
             )
             self.decisions.append(decision)
             return decision
 
-        # CHECK 5: No unresolved conflicts
-        trace5 = self._check_no_conflicts(node, graph)
+        # CHECK 5: Human review state
+        trace5 = self._check_human_reviewed(node)
         traces.append(trace5)
         if not trace5.passed:
             decision = GateDecision(
                 node_id=node.id,
                 can_proceed=False,
-                reason_code=GateReasonCode.CONFLICT_UNRESOLVED,
+                reason_code=GateReasonCode.REVIEW_REQUIRED,
                 reason=trace5.reason,
                 checks=traces
             )
             self.decisions.append(decision)
             return decision
 
-        # CHECK 6: Downstream stage allowed
-        trace6 = self._check_downstream_allowed(node)
+        # CHECK 6: No unresolved conflicts
+        trace6 = self._check_no_conflicts(node, graph)
         traces.append(trace6)
         if not trace6.passed:
             decision = GateDecision(
                 node_id=node.id,
                 can_proceed=False,
-                reason_code=GateReasonCode.DOWNSTREAM_NOT_ALLOWED,
+                reason_code=GateReasonCode.CONFLICT_UNRESOLVED,
                 reason=trace6.reason,
+                checks=traces
+            )
+            self.decisions.append(decision)
+            return decision
+
+        # CHECK 7: Downstream stage allowed
+        trace7 = self._check_downstream_allowed(node)
+        traces.append(trace7)
+        if not trace7.passed:
+            decision = GateDecision(
+                node_id=node.id,
+                can_proceed=False,
+                reason_code=GateReasonCode.DOWNSTREAM_NOT_ALLOWED,
+                reason=trace7.reason,
                 checks=traces
             )
             self.decisions.append(decision)
@@ -337,6 +363,69 @@ class WorkflowGate:
                 "extraction_method": node.provenance.extraction_method,
                 "confidence": node.provenance.confidence
             }
+        )
+
+    def _check_claim_entailed(self, node: Node, graph: Optional["ResearchGraph"] = None) -> CheckTrace:
+        """
+        Claim-source verification: does the claim's *text* actually get entailed
+        by its cited source, or does it merely cite one?
+
+        `_check_provenance_present` above only checks that `source_paper` is a
+        non-empty string -- it says nothing about whether the source actually
+        supports what the claim asserts. That gap is exactly what let
+        qih_stress_corpus.py's `claim_light_angle_derives_gr` through: it cites
+        two real, correctly-formatted sources, and neither one addresses the
+        specific mechanism the claim asserts. Nothing in the gate itself caught
+        that -- the claim was only held because a human set its confidence to
+        0.08 by hand after independent research. This check exists to close
+        that gap at the gate, not just in a human's notes.
+
+        Deliberately a no-op pass (reason_code ALLOWED, evidence checked=False)
+        unless the gate is explicitly constructed with an `entailment_checker`
+        (see claim_verification.py for a real, deterministic default) -- every
+        fixture and test written before this check existed relies on it never
+        firing, so "not configured" has to behave as "not checked," never as
+        "checked and always true." Only claim nodes have text worth entailing,
+        so every other node type also passes automatically, configured or not.
+        """
+        if node.type != "claim":
+            return CheckTrace(
+                check_name="claim_entailed",
+                passed=True,
+                reason=f"Entailment check does not apply to node type '{node.type}'",
+                reason_code=GateReasonCode.ALLOWED,
+                evidence={"checked": False, "node_type": node.type}
+            )
+
+        if self.entailment_checker is None:
+            return CheckTrace(
+                check_name="claim_entailed",
+                passed=True,
+                reason="Entailment verification not configured (no entailment_checker set)",
+                reason_code=GateReasonCode.ALLOWED,
+                evidence={"checked": False}
+            )
+
+        checker_name = getattr(self.entailment_checker, "__name__", repr(self.entailment_checker))
+        source_paper = node.provenance.source_paper if node.provenance else None
+        entailed = bool(self.entailment_checker(node, graph))
+
+        if not entailed:
+            return CheckTrace(
+                check_name="claim_entailed",
+                passed=False,
+                reason=(f"Node {node.id}'s claim text is not entailed by its cited "
+                        f"source (per {checker_name})"),
+                reason_code=GateReasonCode.CLAIM_NOT_ENTAILED,
+                evidence={"checked": True, "source_paper": source_paper, "checker": checker_name}
+            )
+
+        return CheckTrace(
+            check_name="claim_entailed",
+            passed=True,
+            reason=f"Node {node.id}'s claim text is entailed by its cited source (per {checker_name})",
+            reason_code=GateReasonCode.ALLOWED,
+            evidence={"checked": True, "source_paper": source_paper, "checker": checker_name}
         )
 
     def _find_waiver(self, node: Node, graph: Optional["ResearchGraph"]) -> Tuple[Optional[Any], List[str]]:
