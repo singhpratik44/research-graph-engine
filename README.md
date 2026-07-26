@@ -31,6 +31,12 @@ pass, and if a human waived one of those checks — who, and on what grounds.
 | Web UI | `webapp.py` | FastAPI: graph overview, blocked jobs, unresolved conflicts, paper → claims drilldown, review queue, and a small query box over the graph |
 | Live ingestion | `arxiv_ingest.py` | Real calls to the public arXiv API, converted into schema-conforming PAPER nodes, idempotent against re-running the same query |
 | Worked example | `literature_corpus.py` | 20 real papers (two survey rounds) entered as graph data, each `ADDRESSES` a capability gap this repo used to decide what to build next — the repo dogfooding its own schema to plan itself |
+| Run reporting | `run_report.py` | Structured per-run output — files changed, tests, evals, risks, next step — computed for real from git and the actual test/eval runners, not a prose summary |
+
+Process is governed the same way the graph is: `CLAUDE.md` sets the rules an
+autonomous run works under (one bounded roadmap item, branch-only, full
+validation before done, structured report at the end), and `ROADMAP.md`
+sequences what's next one item at a time rather than as an open pile.
 
 ## Quickstart
 
@@ -38,23 +44,29 @@ pass, and if a human waived one of those checks — who, and on what grounds.
 pip install -r requirements.txt
 
 # run everything
-python3 -m unittest discover -p "test_*.py"
+make test              # == python3 -m unittest discover -p "test_*.py"
 
 # see the graph, as a human would
-python3 graph_inspector.py
+make inspect            # == python3 graph_inspector.py
 
 # ask it questions
-python3 graph_roadmap.py
+make roadmap             # == python3 graph_roadmap.py
 
 # check quality, not just correctness
-python3 graph_evals.py
+make evals               # == python3 graph_evals.py
+
+# tests + evals together -- the one thing a run must pass before it's done
+make validate
 
 # the web UI
-uvicorn webapp:app --reload
+make web                 # == uvicorn webapp:app --reload
 # then open http://127.0.0.1:8000
 
 # real arXiv ingestion (needs export.arxiv.org reachable)
 python3 arxiv_ingest.py "all:knowledge graph provenance"
+
+# structured summary of this run: files changed, tests, evals, next step
+make report              # == python3 run_report.py
 ```
 
 ## Why "governed"
