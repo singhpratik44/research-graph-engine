@@ -181,5 +181,57 @@ class TestConformanceUnderRetries(unittest.TestCase):
         self.assertIn("merge", result.skipped)
 
 
+class TestConformanceUnderFaultLocalization(unittest.TestCase):
+    """A run whose SKIPPED cascade names the real failed ancestor(s) must
+    stay just as conformant as a clean run -- fault localization only
+    enriches TaskSpan.error, an already-free-text field."""
+
+    def test_a_run_with_a_localized_skip_is_still_fully_conformant(self):
+        dag = _demo_dag()
+
+        def failing_executor(task_id):
+            if task_id == "extract_claims":
+                raise RuntimeError("boom")
+            return {"confidence": 0.9}
+
+        result = Scheduler(dag).run(failing_executor)
+        report = check_conformance(dag, result)
+        self.assertTrue(report.passed, [c.name for c in report.checks if not c.passed])
+        self.assertEqual(len(report.checks), 6)
+
+        skipped_span = next(s for s in result.spans if s.task_id == "merge")
+        self.assertIn("extract_claims", skipped_span.error)
+
+
+class TestConformanceUnderFailureClassification(unittest.TestCase):
+    """A run using failure_classifier/retry_policy must stay just as
+    conformant as a clean run -- classification only adds an optional,
+    default-None TaskSpan field."""
+
+    def test_a_run_with_class_specific_retries_is_still_fully_conformant(self):
+        dag = _demo_dag()
+        calls = []
+
+        def classifier(exc):
+            return "transient"
+
+        def flaky_then_fine(task_id):
+            if task_id == "extract_claims":
+                calls.append(task_id)
+                if len(calls) < 2:
+                    raise RuntimeError("transient")
+            return {"confidence": 0.9}
+
+        result = Scheduler(dag, max_retries=0, failure_classifier=classifier,
+                           retry_policy={"transient": 3}).run(flaky_then_fine)
+        report = check_conformance(dag, result)
+        self.assertTrue(report.passed, [c.name for c in report.checks if not c.passed])
+        self.assertEqual(len(report.checks), 6)
+
+        retried_span = next(s for s in result.spans if s.task_id == "extract_claims")
+        self.assertEqual(retried_span.failure_class, "transient")
+        self.assertEqual(retried_span.attempts, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -82,6 +82,11 @@ class TaskSpan:
     `attempts` defaults to 1 and `retry_errors` to `[]` -- a task that never retried
     (including every run made with `Scheduler`'s default `max_retries=0`) produces a
     span identical in shape and value to today's.
+
+    `failure_class` (failure-class recovery dispatch): the label a `Scheduler`'s
+    optional `failure_classifier` assigned to this task's failure, if configured.
+    Defaults to `None` -- a task run without a classifier configured produces a
+    span identical in shape and value to today's.
     """
     task_id: str
     agent_id: str
@@ -93,6 +98,7 @@ class TaskSpan:
     error: str = ""
     attempts: int = 1
     retry_errors: List[str] = field(default_factory=list)
+    failure_class: Optional[str] = None
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -145,6 +151,29 @@ class TaskDAG:
         """Tasks in `remaining` whose every dependency is already in `completed`."""
         return [t for t in remaining if all(d in completed for d in self.dependencies_of(t))]
 
+    def failed_ancestors(self, task_id: str, failed: Set[str]) -> List[str]:
+        """
+        Transitive closure of `task_id`'s dependencies, intersected with `failed`
+        -- fault localization for the SKIPPED cascade: which upstream task(s)
+        actually failed and made this one unreachable, not just "a dependency
+        failed" (a dependency either failed or it didn't here, so the exact
+        DEPENDS_ON edges already in the DAG are sufficient -- no separate
+        confidence-graded edge layer is needed to answer this).
+        """
+        seen: Set[str] = set()
+        stack = list(self.dependencies_of(task_id))
+        culprits: Set[str] = set()
+        while stack:
+            dep = stack.pop()
+            if dep in seen:
+                continue
+            seen.add(dep)
+            if dep in failed:
+                culprits.add(dep)
+            else:
+                stack.extend(self.dependencies_of(dep))
+        return sorted(culprits)
+
 
 class Scheduler:
     """
@@ -155,12 +184,28 @@ class Scheduler:
     FAILED and cascading SKIPPED to its dependents. The default of 0 reproduces
     today's behavior exactly -- one attempt, immediate FAILED on any exception,
     no dependent of a failed task ever runs.
+
+    `failure_classifier`/`retry_policy` (failure-class recovery dispatch, both
+    default `None`): when a task's executor raises, `failure_classifier(exc)` may
+    label the failure (e.g. "transient" vs. "structural"); if the label is a key
+    in `retry_policy`, that label's retry count overrides `max_retries` for this
+    failure only, so different failure classes can get different recovery
+    budgets instead of one flat retry count for every exception. With either
+    left `None` (the default), or a raised label not present in `retry_policy`,
+    the retry bound is exactly `max_retries` as today -- one classification
+    knob, off by default, never a second competing retry mechanism. A
+    classifier that itself raises is treated as returning no label, so a buggy
+    classifier can never break scheduling.
     """
 
-    def __init__(self, dag: TaskDAG, max_workers: int = 4, max_retries: int = 0):
+    def __init__(self, dag: TaskDAG, max_workers: int = 4, max_retries: int = 0,
+                 failure_classifier: Optional[Callable[[Exception], str]] = None,
+                 retry_policy: Optional[Dict[str, int]] = None):
         self.dag = dag
         self.max_workers = max_workers
         self.max_retries = max_retries
+        self.failure_classifier = failure_classifier
+        self.retry_policy = retry_policy
 
     def run(self, executor: Callable[[str], Optional[Dict]]) -> RunResult:
         """
@@ -184,6 +229,7 @@ class Scheduler:
 
             attempts = 0
             retry_errors: List[str] = []
+            failure_class: Optional[str] = None
             while True:
                 attempts += 1
                 try:
@@ -193,7 +239,16 @@ class Scheduler:
                     break
                 except Exception as exc:
                     confidence, status, error = None, TaskStatus.FAILED.value, repr(exc)
-                    if attempts - 1 < self.max_retries:
+                    limit = self.max_retries
+                    if self.failure_classifier is not None:
+                        try:
+                            failure_class = self.failure_classifier(exc)
+                        except Exception:
+                            failure_class = None
+                        if (failure_class is not None and self.retry_policy is not None
+                                and failure_class in self.retry_policy):
+                            limit = self.retry_policy[failure_class]
+                    if attempts - 1 < limit:
                         retry_errors.append(error)
                         continue
                     break
@@ -201,7 +256,8 @@ class Scheduler:
             span = TaskSpan(task_id=task_id, agent_id=node.agent_id,
                             parent_task_id=node.parent_task_id, status=status,
                             confidence=confidence, started_at=started, ended_at=_now(),
-                            error=error, attempts=attempts, retry_errors=retry_errors)
+                            error=error, attempts=attempts, retry_errors=retry_errors,
+                            failure_class=failure_class)
             with lock:
                 node.status = status
                 result.spans.append(span)
@@ -216,11 +272,15 @@ class Scheduler:
                 for task_id in remaining:
                     node = self.dag.nodes[task_id]
                     node.status = TaskStatus.SKIPPED.value
+                    culprits = self.dag.failed_ancestors(task_id, result.failed)
+                    error = (f"unreachable: depends (transitively) on failed "
+                             f"task(s): {', '.join(culprits)}" if culprits
+                             else "unreachable: a dependency failed")
                     result.spans.append(TaskSpan(
                         task_id=task_id, agent_id=node.agent_id, parent_task_id=node.parent_task_id,
                         status=TaskStatus.SKIPPED.value, confidence=None,
                         started_at=_now(), ended_at=_now(),
-                        error="unreachable: a dependency failed",
+                        error=error,
                     ))
                     result.skipped.add(task_id)
                 break

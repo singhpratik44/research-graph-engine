@@ -304,5 +304,176 @@ class TestSchedulerAdaptiveRetry(unittest.TestCase):
         self.assertEqual(ran.count("a"), 1, "no retry attempted with the default max_retries=0")
 
 
+class TestFailedAncestors(unittest.TestCase):
+    """TaskDAG.failed_ancestors: transitive closure of a task's dependencies,
+    intersected with the failed set -- the fault-localization primitive."""
+
+    def test_direct_failed_dependency_is_named(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        dag.add_task("b", "b")
+        dag.add_dependency("b", depends_on="a")
+        self.assertEqual(dag.failed_ancestors("b", failed={"a"}), ["a"])
+
+    def test_multi_hop_chain_finds_the_root_cause(self):
+        dag = TaskDAG()
+        for t in ("a", "b", "c"):
+            dag.add_task(t, t)
+        dag.add_dependency("b", depends_on="a")
+        dag.add_dependency("c", depends_on="b")
+        # "a" failed; "b" was skipped as a result; "c" depends on "b" only,
+        # but the real culprit two hops up is still "a".
+        self.assertEqual(dag.failed_ancestors("c", failed={"a"}), ["a"])
+
+    def test_diamond_with_two_independent_failures_finds_both(self):
+        dag = TaskDAG()
+        for t in ("a", "b", "merge"):
+            dag.add_task(t, t)
+        dag.add_dependency("merge", depends_on="a")
+        dag.add_dependency("merge", depends_on="b")
+        self.assertEqual(dag.failed_ancestors("merge", failed={"a", "b"}), ["a", "b"])
+
+    def test_no_failed_ancestor_is_an_empty_list(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        dag.add_task("b", "b")
+        dag.add_dependency("b", depends_on="a")
+        self.assertEqual(dag.failed_ancestors("b", failed=set()), [])
+
+
+class TestSchedulerFaultLocalization(unittest.TestCase):
+    """A SKIPPED task's span names the real upstream culprit(s), not a
+    generic "a dependency failed" -- multi-hop chains must still localize
+    correctly, since Scheduler's cascade only ever sees direct failures."""
+
+    def test_skipped_span_names_the_direct_failed_dependency(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        dag.add_task("b", "b")
+        dag.add_dependency("b", depends_on="a")
+
+        def executor(task_id):
+            if task_id == "a":
+                raise RuntimeError("boom")
+            return {"confidence": 1.0}
+
+        result = Scheduler(dag).run(executor)
+        skipped_span = next(s for s in result.spans if s.task_id == "b")
+        self.assertIn("a", skipped_span.error)
+        self.assertNotEqual(skipped_span.error, "unreachable: a dependency failed")
+
+    def test_skipped_span_names_a_multi_hop_root_cause(self):
+        dag = TaskDAG()
+        for t in ("a", "b", "c"):
+            dag.add_task(t, t)
+        dag.add_dependency("b", depends_on="a")
+        dag.add_dependency("c", depends_on="b")
+
+        def executor(task_id):
+            if task_id == "a":
+                raise RuntimeError("boom")
+            return {"confidence": 1.0}
+
+        result = Scheduler(dag).run(executor)
+        c_span = next(s for s in result.spans if s.task_id == "c")
+        self.assertIn("a", c_span.error)
+
+    def test_default_generic_message_preserved_when_no_culprit_found(self):
+        # A cycle-free DAG where the "no ready tasks" branch fires without any
+        # actual failure in `result.failed` shouldn't happen via the real
+        # Scheduler, but failed_ancestors() itself must degrade to the old
+        # generic message when it finds nothing -- exercised directly here.
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        self.assertEqual(dag.failed_ancestors("a", failed=set()), [])
+
+
+class TestSchedulerFailureClassification(unittest.TestCase):
+    """failure_classifier/retry_policy: an optional per-failure-class retry
+    budget, off by default (both None reproduce today's flat max_retries)."""
+
+    def test_defaults_reproduce_flat_max_retries_behavior(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def always_failing(task_id):
+            calls.append(task_id)
+            raise RuntimeError("boom")
+
+        result = Scheduler(dag, max_retries=2).run(always_failing)
+        self.assertEqual(len(calls), 3)
+        span = result.spans[0]
+        self.assertEqual(span.attempts, 3)
+        self.assertIsNone(span.failure_class)
+
+    def test_classifier_labels_the_span_even_without_a_retry_policy(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+
+        def classifier(exc):
+            return "transient" if "transient" in str(exc) else "structural"
+
+        def failing(task_id):
+            raise RuntimeError("transient glitch")
+
+        result = Scheduler(dag, failure_classifier=classifier).run(failing)
+        self.assertEqual(result.spans[0].failure_class, "transient")
+
+    def test_retry_policy_grants_a_class_specific_retry_budget(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def classifier(exc):
+            return "transient"
+
+        def flaky(task_id):
+            calls.append(task_id)
+            if len(calls) < 3:
+                raise RuntimeError("transient glitch")
+            return {"confidence": 0.9}
+
+        # max_retries=0 would normally fail after one attempt; retry_policy
+        # grants "transient" 5 retries instead, proving the class-specific
+        # budget actually overrides the flat default, not just labels it.
+        result = Scheduler(dag, max_retries=0, failure_classifier=classifier,
+                           retry_policy={"transient": 5}).run(flaky)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("a", result.completed)
+        self.assertEqual(result.spans[0].failure_class, "transient")
+
+    def test_retry_policy_is_inert_for_an_unlisted_class(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def classifier(exc):
+            return "unlisted_class"
+
+        def always_failing(task_id):
+            calls.append(task_id)
+            raise RuntimeError("boom")
+
+        result = Scheduler(dag, max_retries=0, failure_classifier=classifier,
+                           retry_policy={"transient": 5}).run(always_failing)
+        self.assertEqual(len(calls), 1, "an unlisted class must fall back to max_retries, not retry_policy")
+        self.assertIn("a", result.failed)
+
+    def test_a_classifier_that_raises_never_breaks_scheduling(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+
+        def broken_classifier(exc):
+            raise ValueError("classifier itself is broken")
+
+        def failing(task_id):
+            raise RuntimeError("boom")
+
+        result = Scheduler(dag, failure_classifier=broken_classifier).run(failing)
+        self.assertIn("a", result.failed)
+        self.assertIsNone(result.spans[0].failure_class)
+
+
 if __name__ == "__main__":
     unittest.main()
