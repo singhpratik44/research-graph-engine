@@ -56,52 +56,55 @@ moves to the next item after `make validate` is green and a human has merged.
   Deliberately kept out of `webapp.py`'s default demo graph (a portfolio UI
   shouldn't silently surface adversarial content about a real named
   individual without context).
+- Three backlog items built in parallel (isolated git worktrees, one agent
+  each, merged with zero file conflicts since each was scoped to distinct
+  files) — closing four of the five original capability gaps:
+  - **Graph memory** (`graph_memory.py`, schema bumped 3.0.0 → 3.1.0). A new
+    `NodeType.MEMORY_RECORD` (with a closed `MemoryKind` enum: task_outcome,
+    claim_accepted, claim_rejected, reviewer_disagreement, blocked_reason,
+    repair_pattern) plus five new typed `EdgeType` values (`SUPPORTED_BY`,
+    `REJECTED_BECAUSE`, `DISAGREED_ON`, `REPAIRED_VIA`, `DERIVED_FROM`) —
+    this closes `gap_typed_provenance_edges` as designed once, here, rather
+    than as a separate pass. `graph_memory.py` is the one legitimate writer
+    besides `research_graph_workers.py`; every other query/inspector/roadmap/
+    evals module stays read-only.
+  - **Claim-source verification gate** (`claim_verification.py`, new
+    `GateReasonCode.CLAIM_NOT_ENTAILED`, new `_check_claim_entailed` check
+    in `WorkflowGate`). Closes `gap_claim_source_verify`. Pluggable via
+    `entailment_checker=None` by default (a true no-op, so every
+    pre-existing test is unaffected); `keyword_overlap_entailment_checker`
+    is the deterministic default, explicitly documented as a heuristic
+    proxy, not real NLP entailment. Directly demonstrated against the real
+    case that motivated it: `qih_stress_corpus.py`'s light-angle claim now
+    fails on `CLAIM_NOT_ENTAILED` (score ≈0.053 vs. a 0.15 threshold)
+    instead of only being caught by hand-assigned low confidence.
+  - **Adaptive recovery loop** (`WorkerSpawner.admit(..., retry_with=,
+    max_retries=)`, `Scheduler(..., max_retries=)`). Closes
+    `gap_adaptive_recovery`. Both default to today's exact one-attempt
+    behavior (`retry_with=None` / `max_retries=0`) — every pre-existing
+    test passes unmodified. `TaskSpan` gained `attempts`/`retry_errors`
+    fields, one span per task updated in place (not one span per attempt),
+    so `task_conformance.py`'s six checks needed zero changes.
+
+  Only `gap_multidim_review` (12 papers, the corpus's best-attested gap)
+  remains open — and it's exactly what the specialist agent split below
+  addresses. Full suite: 365 tests passing.
 
 ## Next
 
-- [ ] Graph memory. Persist, as structured graph data (not flattened
-      transcripts): prior task outcomes, accepted claims, rejected claims,
-      reviewer disagreements, blocked reasons, and successful repair
-      patterns — so future runs get better routing and better review
-      decisions. Likely subsumes `gap_typed_provenance_edges` below: a
-      memory node needs typed edges (`SUPPORTED_BY`, `REJECTED`,
-      `DISAGREED_ON`, ...) to be more than a flat log, so design that
-      typing once, here, rather than twice.
+- [ ] Specialist agent split: extractor, conflict checker, schema
+      validator, reviewer/judge — bounded specialists with explicit
+      handoffs over the task DAG, not many freely-chatting agents. Now
+      unblocked: DAG + traces (`task_graph.py`) and memory
+      (`graph_memory.py`) are both stable, per this turn's explicit
+      sequencing (DAG + traces + memory, then agents). Closes the last
+      open gap, `gap_multidim_review` — reconciling multiple specialist
+      verdicts on one node is the multi-dimensional review the corpus's
+      12 papers on this gap all argue for, replacing today's single
+      scalar `ReviewStatus`/confidence.
 
 ## Backlog (in order)
 
-- [ ] Specialist agent split: extractor, conflict checker, schema
-      validator, reviewer/judge — bounded specialists with explicit
-      handoffs over the task DAG, not many freely-chatting agents. Comes
-      *after* graph memory is stable, per this turn's explicit sequencing
-      (DAG + traces + memory first).
-- [ ] Typed provenance edges (`gap_typed_provenance_edges`, 4 papers in the
-      corpus) — see the note under graph memory above; design once as part
-      of that work rather than as a separate pass.
-- [ ] Claim-source verification gate (`gap_claim_source_verify`, 4 papers).
-      `_check_provenance_present` only checks a `source_paper` field is
-      non-empty. Add a real entailment/verification check and a new
-      `GateReasonCode` (e.g. `CLAIM_NOT_ENTAILED`).
-
-      **Concrete real-world case that motivates this** (from
-      `qih_stress_corpus.py`'s fact-check, not hypothetical): QIH's central
-      claim ("light angle distributions derive Einstein's field equations")
-      cites two real, correctly-formatted sources — but neither one, on
-      inspection, actually addresses the specific mechanism claimed. Today's
-      gate can't catch that: `_check_provenance_present` only asks "is
-      `source_paper` non-empty," so a claim with a real-looking but
-      non-supporting citation passes that check identically to a claim whose
-      citation genuinely backs it. The only reason
-      `claim_light_angle_derives_gr` is held in the stress corpus is its
-      *confidence* (0.08, assigned by hand after independent research) —
-      nothing in the gate itself would have caught a citation mismatch on
-      its own. That's exactly the check this backlog item needs to add:
-      verify a claim is *entailed by* its cited source, not merely that a
-      `source_paper` field is populated.
-- [ ] Adaptive recovery loop for `WorkerSpawner.admit()` (`gap_adaptive_recovery`,
-      2 papers) and for `Scheduler` (a failed task's dependents are currently
-      SKIPPED, never retried). A rejected envelope/failed task should support
-      a diagnose-and-retarget retry path, not just fail wholesale.
 - [ ] Hugging Face Papers / LangChain Blog ingestion — currently documented
       `NotImplementedError` stubs in `arxiv_ingest.py` because neither source
       has a stable public API. Revisit if either publishes a feed.
