@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import graph_evals as evals
+import task_conformance
+from task_graph import Scheduler
 
 REPO_ROOT = Path(__file__).resolve().parent
 ROADMAP_PATH = REPO_ROOT / "ROADMAP.md"
@@ -96,6 +98,27 @@ def run_eval_suite() -> Dict:
     }
 
 
+def run_conformance_check() -> Dict:
+    """
+    Runs task_conformance's demo TaskDAG through the real Scheduler and
+    validates the result -- the "tasks run, failures, retries, final gate
+    outcome" piece of the run artifact. (No retry loop exists yet: a failed
+    task is SKIPPED downstream, never retried -- that's future work, not
+    something to report a fake number for here.)
+    """
+    dag = task_conformance._demo_dag()
+    result = Scheduler(dag).run(lambda task_id: {"confidence": 0.9})
+    report = task_conformance.check_conformance(dag, result)
+    return {
+        "tasks_run": len(result.spans),
+        "completed": len(result.completed),
+        "failed": len(result.failed),
+        "skipped": len(result.skipped),
+        "conformance_passed": report.passed,
+        "failing_checks": [c.name for c in report.checks if not c.passed],
+    }
+
+
 def next_roadmap_step() -> str:
     """
     First unchecked '- [ ]' item under '## Next' in ROADMAP.md, including any
@@ -130,12 +153,13 @@ class RunReport:
     commands_run: List[str]
     tests: Dict
     evals: Dict
+    conformance: Dict
     risks: List[str] = field(default_factory=list)
     next_step: str = ""
 
     @property
     def all_green(self) -> bool:
-        return self.tests["passed"] and self.evals["all_passed"]
+        return self.tests["passed"] and self.evals["all_passed"] and self.conformance["conformance_passed"]
 
     def to_markdown(self) -> str:
         lines = [
@@ -165,6 +189,17 @@ class RunReport:
             lines.append(f"- failing: {', '.join(self.evals['failing'])}")
         lines += [
             "",
+            "## Conformance (demo task-DAG run)",
+            f"- tasks run: {self.conformance['tasks_run']} "
+            f"(completed={self.conformance['completed']}, "
+            f"failed={self.conformance['failed']}, "
+            f"skipped={self.conformance['skipped']})",
+            f"- conformance: {'PASS' if self.conformance['conformance_passed'] else 'FAIL'}",
+        ]
+        if self.conformance["failing_checks"]:
+            lines.append(f"- failing checks: {', '.join(self.conformance['failing_checks'])}")
+        lines += [
+            "",
             "## Risks",
         ]
         lines += [f"- {r}" for r in self.risks] or ["- none noted"]
@@ -191,9 +226,11 @@ def build_report(
         timestamp=datetime.now(timezone.utc).isoformat(),
         branch=current_branch(),
         files_changed=files_changed(base),
-        commands_run=["git diff/status", f"unittest discover -p {test_pattern}", "graph_evals.run_all()"],
+        commands_run=["git diff/status", f"unittest discover -p {test_pattern}", "graph_evals.run_all()",
+                      "task_conformance (demo TaskDAG through Scheduler)"],
         tests=run_tests(test_pattern),
         evals=run_eval_suite(),
+        conformance=run_conformance_check(),
         risks=risks or [],
         next_step=next_step or next_roadmap_step(),
     )

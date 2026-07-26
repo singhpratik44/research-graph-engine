@@ -131,6 +131,17 @@ class TestRunTestsAndEvals(unittest.TestCase):
         self.assertGreater(result["run"], 0)
         self.assertTrue(result["passed"])
 
+    def test_run_conformance_check_shape_and_passes_on_the_demo_dag(self):
+        result = rr.run_conformance_check()
+        for key in ("tasks_run", "completed", "failed", "skipped",
+                    "conformance_passed", "failing_checks"):
+            self.assertIn(key, result)
+        self.assertTrue(result["conformance_passed"])
+        self.assertEqual(result["failing_checks"], [])
+        self.assertEqual(result["tasks_run"], result["completed"])
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(result["skipped"], 0)
+
 
 class TestBuildReportAndMarkdown(unittest.TestCase):
     """
@@ -159,7 +170,8 @@ class TestBuildReportAndMarkdown(unittest.TestCase):
     def test_markdown_contains_every_section(self):
         report = rr.build_report(risks=["a known risk"], test_pattern="test_gates.py")
         md = report.to_markdown()
-        for heading in ("Files changed", "Commands run", "Tests", "Evals", "Risks", "Next step"):
+        for heading in ("Files changed", "Commands run", "Tests", "Evals",
+                       "Conformance", "Risks", "Next step"):
             self.assertIn(heading, md)
         self.assertIn("a known risk", md)
 

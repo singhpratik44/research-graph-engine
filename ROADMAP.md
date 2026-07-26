@@ -30,25 +30,49 @@ moves to the next item after `make validate` is green and a human has merged.
   unconsumed) — inserted ahead of the queued item below per explicit
   follow-up direction from a second research round on multi-agent graph
   architecture.
+- Task DAG + scheduler + structured trace spans + conformance check
+  (`task_graph.py`, `task_conformance.py`, `make conformance`). `TaskDAG`/
+  `TaskEdge` model work as an explicit, cycle-checked DAG; `Scheduler` runs
+  dependency-free tasks concurrently for real (a genuine thread pool, unlike
+  `graph_orchestrator.Orchestrator`'s deliberately-sequential fan-out over
+  the single-writer `ResearchGraph`) with merge barriers between rounds;
+  every task gets one `TaskSpan` (`task_id`, `agent_id`, `parent_task_id`,
+  `status`, `confidence`, `started_at`, `ended_at`); `task_conformance.py`
+  validates a whole run against six checks. `run_report.py` now runs the
+  demo DAG through the real scheduler and reports tasks/completed/failed/
+  skipped alongside tests/evals. `graph_algorithms.py` factored out so the
+  cycle-detection algorithm isn't duplicated between this and
+  `graph_queries.detect_job_dependency_cycles`.
 
 ## Next
 
-- [ ] Typed provenance edges (`gap_typed_provenance_edges`, 4 papers in the
-      corpus). Today `Provenance` is one flat record. Add typed `EdgeType`
-      values (e.g. `DERIVED_FROM`, `SUPERSEDES`) to `research_graph_schema.py`,
-      regenerate `graph_schema.json` via `export_json_schema()`, and prove the
-      gate still evaluates identically on the existing golden fixtures before
-      touching anything downstream.
+- [ ] Graph memory. Persist, as structured graph data (not flattened
+      transcripts): prior task outcomes, accepted claims, rejected claims,
+      reviewer disagreements, blocked reasons, and successful repair
+      patterns — so future runs get better routing and better review
+      decisions. Likely subsumes `gap_typed_provenance_edges` below: a
+      memory node needs typed edges (`SUPPORTED_BY`, `REJECTED`,
+      `DISAGREED_ON`, ...) to be more than a flat log, so design that
+      typing once, here, rather than twice.
 
 ## Backlog (in order)
 
+- [ ] Specialist agent split: extractor, conflict checker, schema
+      validator, reviewer/judge — bounded specialists with explicit
+      handoffs over the task DAG, not many freely-chatting agents. Comes
+      *after* graph memory is stable, per this turn's explicit sequencing
+      (DAG + traces + memory first).
+- [ ] Typed provenance edges (`gap_typed_provenance_edges`, 4 papers in the
+      corpus) — see the note under graph memory above; design once as part
+      of that work rather than as a separate pass.
 - [ ] Claim-source verification gate (`gap_claim_source_verify`, 4 papers).
       `_check_provenance_present` only checks a `source_paper` field is
       non-empty. Add a real entailment/verification check and a new
       `GateReasonCode` (e.g. `CLAIM_NOT_ENTAILED`).
 - [ ] Adaptive recovery loop for `WorkerSpawner.admit()` (`gap_adaptive_recovery`,
-      2 papers). A rejected envelope fails the job wholesale today; add a
-      diagnose-and-retarget retry path.
+      2 papers) and for `Scheduler` (a failed task's dependents are currently
+      SKIPPED, never retried). A rejected envelope/failed task should support
+      a diagnose-and-retarget retry path, not just fail wholesale.
 - [ ] Hugging Face Papers / LangChain Blog ingestion — currently documented
       `NotImplementedError` stubs in `arxiv_ingest.py` because neither source
       has a stable public API. Revisit if either publishes a feed.

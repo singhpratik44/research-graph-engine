@@ -1,4 +1,4 @@
-.PHONY: test inspect roadmap evals validate web report
+.PHONY: test inspect roadmap evals conformance validate web report
 
 test:
 	python3 -m unittest discover -p "test_*.py"
@@ -12,9 +12,16 @@ roadmap:
 evals:
 	python3 graph_evals.py
 
+# Validates a whole task-DAG run: every task has exactly one span, span
+# status matches the task's final status, timing isn't backwards,
+# completed/failed/skipped exactly partition the DAG, no dependency cycles,
+# every completed span recorded a confidence. Exits non-zero on any failure.
+conformance:
+	python3 task_conformance.py
+
 # The one thing an autonomous run must pass before it's done: tests + evals,
 # together, in one deterministic command. See CLAUDE.md.
-validate: test evals
+validate: test evals conformance
 
 web:
 	uvicorn webapp:app --reload
