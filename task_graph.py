@@ -73,7 +73,16 @@ class TaskEdge:
 
 @dataclass
 class TaskSpan:
-    """One task's execution record -- the per-task trace span the survey asks for."""
+    """
+    One task's execution record -- the per-task trace span the survey asks for.
+
+    `attempts`/`retry_errors` exist for the bounded retry loop (`gap_adaptive_recovery`):
+    a task still gets exactly ONE span (task_conformance.py's "every task has exactly
+    one span" check is unchanged), but that span now records how many tries it took.
+    `attempts` defaults to 1 and `retry_errors` to `[]` -- a task that never retried
+    (including every run made with `Scheduler`'s default `max_retries=0`) produces a
+    span identical in shape and value to today's.
+    """
     task_id: str
     agent_id: str
     parent_task_id: Optional[str]
@@ -82,6 +91,8 @@ class TaskSpan:
     started_at: str
     ended_at: Optional[str] = None
     error: str = ""
+    attempts: int = 1
+    retry_errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -136,17 +147,27 @@ class TaskDAG:
 
 
 class Scheduler:
-    """Runs a TaskDAG to completion, one merge-barrier round at a time."""
+    """
+    Runs a TaskDAG to completion, one merge-barrier round at a time.
 
-    def __init__(self, dag: TaskDAG, max_workers: int = 4):
+    `max_retries` (default 0, `gap_adaptive_recovery`): when `executor(task_id)`
+    raises, retry the same task up to `max_retries` more times before marking it
+    FAILED and cascading SKIPPED to its dependents. The default of 0 reproduces
+    today's behavior exactly -- one attempt, immediate FAILED on any exception,
+    no dependent of a failed task ever runs.
+    """
+
+    def __init__(self, dag: TaskDAG, max_workers: int = 4, max_retries: int = 0):
         self.dag = dag
         self.max_workers = max_workers
+        self.max_retries = max_retries
 
     def run(self, executor: Callable[[str], Optional[Dict]]) -> RunResult:
         """
         `executor(task_id)` runs one task and may return {"confidence": float}
-        (or nothing). Raising marks the task FAILED and skips everything that
-        transitively depends on it -- it is never silently ignored.
+        (or nothing). Raising retries the task (bounded by `self.max_retries`);
+        once retries are exhausted the task is marked FAILED and everything that
+        transitively depends on it is skipped -- it is never silently ignored.
         """
         cycles = self.dag.detect_cycles()
         if cycles:
@@ -160,17 +181,27 @@ class Scheduler:
             started = _now()
             with lock:
                 node.status = TaskStatus.RUNNING.value
-            try:
-                outcome = executor(task_id) or {}
-                confidence = outcome.get("confidence")
-                status, error = TaskStatus.COMPLETED.value, ""
-            except Exception as exc:
-                confidence, status, error = None, TaskStatus.FAILED.value, repr(exc)
+
+            attempts = 0
+            retry_errors: List[str] = []
+            while True:
+                attempts += 1
+                try:
+                    outcome = executor(task_id) or {}
+                    confidence = outcome.get("confidence")
+                    status, error = TaskStatus.COMPLETED.value, ""
+                    break
+                except Exception as exc:
+                    confidence, status, error = None, TaskStatus.FAILED.value, repr(exc)
+                    if attempts - 1 < self.max_retries:
+                        retry_errors.append(error)
+                        continue
+                    break
 
             span = TaskSpan(task_id=task_id, agent_id=node.agent_id,
                             parent_task_id=node.parent_task_id, status=status,
                             confidence=confidence, started_at=started, ended_at=_now(),
-                            error=error)
+                            error=error, attempts=attempts, retry_errors=retry_errors)
             with lock:
                 node.status = status
                 result.spans.append(span)

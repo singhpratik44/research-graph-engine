@@ -132,5 +132,54 @@ class TestConfidenceCheck(unittest.TestCase):
         self.assertTrue(confidence_check.passed)
 
 
+class TestConformanceUnderRetries(unittest.TestCase):
+    """
+    gap_adaptive_recovery: TaskSpan gained `attempts`/`retry_errors` fields, but
+    a retried task still produces exactly one span (the six checks are about
+    per-task spans, not per-attempt), so a run that used retries must stay just
+    as conformant as a clean run -- this is what "one span updated in place"
+    was chosen over "one span per attempt" to preserve.
+    """
+
+    def test_a_run_with_a_successful_retry_is_still_fully_conformant(self):
+        dag = _demo_dag()
+        calls = []
+
+        def flaky_then_fine(task_id):
+            if task_id == "extract_claims":
+                calls.append(task_id)
+                if len(calls) < 2:
+                    raise RuntimeError("transient")
+            return {"confidence": 0.9}
+
+        result = Scheduler(dag, max_retries=1).run(flaky_then_fine)
+        report = check_conformance(dag, result)
+        self.assertTrue(report.passed, [c.name for c in report.checks if not c.passed])
+        self.assertEqual(len(report.checks), 6)
+
+        retried_span = next(s for s in result.spans if s.task_id == "extract_claims")
+        self.assertEqual(retried_span.attempts, 2)
+        self.assertEqual(len(retried_span.retry_errors), 1)
+
+    def test_a_run_with_exhausted_retries_is_still_fully_conformant(self):
+        dag = _demo_dag()
+
+        def always_fails(task_id):
+            if task_id == "extract_claims":
+                raise RuntimeError("boom")
+            return {"confidence": 0.9}
+
+        result = Scheduler(dag, max_retries=2).run(always_fails)
+        report = check_conformance(dag, result)
+        self.assertTrue(report.passed, [c.name for c in report.checks if not c.passed])
+
+        failed_span = next(s for s in result.spans if s.task_id == "extract_claims")
+        self.assertEqual(failed_span.attempts, 3)
+        self.assertEqual(failed_span.status, TaskStatus.FAILED.value)
+        # merge depends (transitively) on extract_claims, so it must be skipped,
+        # exactly like the non-retrying failure-propagation case.
+        self.assertIn("merge", result.skipped)
+
+
 if __name__ == "__main__":
     unittest.main()

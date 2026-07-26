@@ -7,6 +7,14 @@ human pasting JSON. Nothing it returns enters the graph until the spawner has va
 the whole envelope against Phase 3's schema and Phase 2's gate. A rejected envelope
 fails the job — it never lands partially.
 
+`WorkerSpawner.admit()` optionally supports a bounded diagnose-and-retry loop
+(`gap_adaptive_recovery`): pass `retry_with` — a callable given the directive and the
+*actual* `ValidationError`s that rejected the attempt — to produce a new envelope to
+try instead, up to `max_retries` times. Every attempt, successful or not, is recorded
+on the job (`retry_attempts`, `retry_count`, `original_failure`) — auditable, never a
+silent overwrite. Default behavior (no `retry_with`) is untouched: one attempt, fail
+whole on rejection, exactly as before.
+
 Three pieces:
   ExtractionDirective — the contract handed *to* a worker (what to do, what to prove)
   ResultEnvelope      — the contract handed *back* (what was produced, why, by whom)
@@ -17,7 +25,7 @@ in it. If the loop only works with an LLM attached, the plumbing isn't proven.
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 import hashlib
 import re
@@ -267,7 +275,24 @@ class WorkerSpawner:
 
         return errors
 
-    def admit(self, directive: ExtractionDirective, env: ResultEnvelope) -> AdmissionResult:
+    def admit(self, directive: ExtractionDirective, env: ResultEnvelope,
+              retry_with: Optional[Callable[[ExtractionDirective, List[ValidationError]],
+                                            ResultEnvelope]] = None,
+              max_retries: int = 1) -> AdmissionResult:
+        """
+        Admit `env` against `directive`. On rejection by `_verify_envelope`, and only
+        if `retry_with` is supplied, retry up to `max_retries` times: `retry_with` is
+        called with the directive and the *actual* `ValidationError`s from the failed
+        attempt (why it was rejected, not just that it was) and must produce a new
+        envelope to try instead.
+
+        `retry_with=None` (the default) is byte-for-byte the original behavior: one
+        attempt, and a rejection fails the job wholly — no extra bookkeeping is even
+        written to `job.properties` in that path. Every attempt actually made when a
+        retry function IS supplied stays on the record (`retry_attempts`,
+        `retry_count`, `original_failure`), so a retried admission is still fully
+        auditable, never a silent overwrite of what went wrong the first time.
+        """
         job = self.graph.index().get(directive.job_id)
         if job is None:
             raise KeyError(f"unknown job {directive.job_id!r} — spawn it first")
@@ -282,12 +307,38 @@ class WorkerSpawner:
                                    [ValidationError("worker_status", "BAD_TYPE",
                                                     env.error or "worker reported failure")])
 
-        errors = self._verify_envelope(directive, env)
-        if errors:
-            # Fail whole, not partial. A half-admitted extraction is unauditable.
-            job.properties["status"] = JobStatus.FAILED.value
-            job.properties["result_count"] = 0
-            return AdmissionResult(False, job, errors)
+        # -- diagnose-and-retry loop (gap_adaptive_recovery) ---------------
+        # `attempts` stays empty -- and no extra job.properties get written -- unless
+        # retry_with is actually supplied and actually used, so the retry_with=None
+        # default takes exactly one pass through this loop, identical to the
+        # original single-shot admit.
+        attempts: List[Dict[str, Any]] = []
+        current_env = env
+        while True:
+            errors = self._verify_envelope(directive, current_env)
+            if not errors:
+                break
+            if retry_with is None or len(attempts) >= max_retries:
+                # Fail whole, not partial. A half-admitted extraction is unauditable.
+                job.properties["status"] = JobStatus.FAILED.value
+                job.properties["result_count"] = 0
+                if attempts:
+                    attempts.append({"errors": [e.to_dict() for e in errors]})
+                    job.properties["retry_attempts"] = attempts
+                    job.properties["retry_count"] = len(attempts) - 1
+                    job.properties["original_failure"] = attempts[0]["errors"]
+                return AdmissionResult(False, job, errors)
+            attempts.append({"errors": [e.to_dict() for e in errors]})
+            current_env = retry_with(directive, errors)
+            job.properties["worker_id"] = current_env.worker_id
+            job.properties["completed_at"] = current_env.completed_at
+            job.properties["traces"] = list(current_env.traces)
+
+        env = current_env
+        if attempts:
+            job.properties["retry_attempts"] = attempts
+            job.properties["retry_count"] = len(attempts)
+            job.properties["original_failure"] = attempts[0]["errors"]
 
         confs = [n.provenance.confidence for n in env.nodes
                  if n.provenance and n.provenance.confidence is not None]
