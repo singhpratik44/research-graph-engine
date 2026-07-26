@@ -130,51 +130,44 @@ moves to the next item after `make validate` is green and a human has merged.
     `CheckTrace.evidence`.
 
   Full suite: 441 tests passing.
+- Specialist agent split: extractor, conflict checker, schema validator,
+  reviewer/judge — bounded specialists with explicit handoffs over the
+  task DAG, not many freely-chatting agents (`specialist_review.py`). Four
+  bounded roles — extractor, schema validator, conflict checker,
+  reviewer/judge — run as an explicit `task_graph.TaskDAG` (`extract` →
+  `{conflict_check, schema_validate}` in parallel → `reviewer_judge`),
+  each producing an independent, always-completed `SpecialistVerdict`,
+  reconciled into one `SpecialistPipelineReport`. `SpecialistVerdict` is
+  deliberately kept separate from `GateDecision.checks` — they answer
+  different questions (one short-circuited governing verdict vs. one
+  bounded role's independent read) — so `research_graph_gates.py` is
+  untouched. The schema-validator and conflict-checker roles wrap the
+  same pure functions (`validate_node`, `detect_conflicts_in_graph`)
+  `graph_orchestrator.py`'s docstring already credited to
+  `WorkerSpawner.admit()`, just surfaced as explicit verdicts instead of
+  an invisible re-check; `reconcile_and_admit` records a
+  `graph_memory.record_disagreement` when the two specialists disagree,
+  then calls the real, unchanged `admit()` unconditionally. Purely
+  additive: `research_graph_gates.py`, `research_graph_workers.py`,
+  `research_graph_schema.py`, `task_graph.py`, `graph_memory.py`, and
+  `graph_orchestrator.py` are all unmodified. Closes all five original
+  capability gaps (`gap_typed_provenance_edges`, `gap_claim_source_verify`,
+  `gap_roadmap_queries`, `gap_adaptive_recovery`, `gap_multidim_review`).
+  Merged via PR #1 into `main` (merge commit `bb74dae4`).
 
 ## Next
 
-- [x] Specialist agent split: extractor, conflict checker, schema
-      validator, reviewer/judge — bounded specialists with explicit
-      handoffs over the task DAG, not many freely-chatting agents. Now
-      unblocked: DAG + traces (`task_graph.py`) and memory
-      (`graph_memory.py`) are both stable, per this turn's explicit
-      sequencing (DAG + traces + memory, then agents). Closes the last
-      open gap, `gap_multidim_review` — reconciling multiple specialist
-      verdicts on one node is the multi-dimensional review the corpus's
-      12 papers on this gap all argue for, replacing today's single
-      scalar `ReviewStatus`/confidence.
-
-      Built as `specialist_review.py`: four bounded roles — extractor,
-      schema validator, conflict checker, reviewer/judge — run as an
-      explicit `task_graph.TaskDAG` (`extract` → `{conflict_check,
-      schema_validate}` in parallel → `reviewer_judge`), each producing an
-      independent, always-completed `SpecialistVerdict`, reconciled into
-      one `SpecialistPipelineReport`. `SpecialistVerdict` is deliberately
-      kept separate from `GateDecision.checks` — they answer different
-      questions (one short-circuited governing verdict vs. one bounded
-      role's independent read) — so `research_graph_gates.py` is
-      untouched. The schema-validator and conflict-checker roles wrap the
-      same pure functions (`validate_node`, `detect_conflicts_in_graph`)
-      `graph_orchestrator.py`'s docstring already credited to
-      `WorkerSpawner.admit()`, just surfaced as explicit verdicts instead
-      of an invisible re-check; `reconcile_and_admit` records a
-      `graph_memory.record_disagreement` when the two specialists
-      disagree, then calls the real, unchanged `admit()` unconditionally.
-      Purely additive: `research_graph_gates.py`,
-      `research_graph_workers.py`, `research_graph_schema.py`,
-      `task_graph.py`, `graph_memory.py`, and `graph_orchestrator.py` are
-      all unmodified. Closes all five original capability gaps
-      (`gap_typed_provenance_edges`, `gap_claim_source_verify`,
-      `gap_roadmap_queries`, `gap_adaptive_recovery`,
-      `gap_multidim_review`). Moving this to `## Done` and promoting the
-      next backlog item happens at merge time (rule 5 below), not on this
-      branch.
+- [ ] Hugging Face Papers / LangChain Blog ingestion — currently documented
+      `NotImplementedError` stubs in `arxiv_ingest.py` because neither source
+      has a stable public API. Revisit if either publishes a feed. Promoted
+      here at merge time per rule 5, but note it is currently blocked
+      externally (no stable public API to ingest against) — whoever picks
+      this up should re-check whether either source has published a feed
+      before doing anything else, and stop and report back if not, rather
+      than inventing scope to fill the slot.
 
 ## Backlog (in order)
 
-- [ ] Hugging Face Papers / LangChain Blog ingestion — currently documented
-      `NotImplementedError` stubs in `arxiv_ingest.py` because neither source
-      has a stable public API. Revisit if either publishes a feed.
 - [ ] Re-run `arxiv_ingest.py` for real once `export.arxiv.org` is reachable
       from wherever this repo is being worked on (blocked by this session's
       egress policy when last attempted). Re-confirmed 2026-07-26: live call
