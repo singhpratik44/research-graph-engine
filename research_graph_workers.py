@@ -145,6 +145,59 @@ class AdmissionResult:
 
 
 # ============================================================================
+# FAILURE CLASSIFICATION (failure-class recovery dispatch)
+# ============================================================================
+
+def classify_rejection(errors: List[ValidationError]) -> str:
+    """
+    Pure, deterministic classification of a rejected admit() attempt into a
+    broad failure class -- NOT wired into admit() itself. A caller's own
+    retry_with can call this to build a differentiated recovery strategy
+    (retry / argument-repair / escalate) instead of one undifferentiated
+    blind retry, per the failure-class-dispatch pattern this closes.
+    admit()'s own signature, defaults, and control flow are completely
+    unchanged by this function's existence -- it's a standalone tool for a
+    caller to consult, not a new code path inside admission.
+
+    Categories, checked in this order (a rejection can trip more than one
+    of _verify_envelope's checks at once, so precedence runs from "least
+    fixable by a simple retry" to "most fixable"):
+      "worker_reported_failure" -- the worker itself reported failure (the
+          synthetic ValidationError("worker_status", ...) admit() raises at
+          the env.worker_status == "failed" short-circuit, before
+          _verify_envelope ever runs).
+      "capacity_violation"      -- too many results for max_results, or a
+          node's confidence below the directive's floor -- both about *how
+          much*/*how confident* was produced, not a malformed node.
+      "structural_mismatch"     -- envelope-level identity errors: job_id
+          mismatch, missing worker_id, wrong node type, duplicate/colliding
+          node ids -- the envelope doesn't match its own directive's shape.
+      "trace_integrity"         -- missing/duplicate/orphaned/mismatched
+          trace errors -- the nodes may be fine, but their audit trail isn't.
+      "reparable_field_error"   -- a per-node schema field error (missing
+          field, bad type, bad enum, out of range, spoofed source_paper,
+          self-marked human_reviewed) -- plausibly fixable by re-asking the
+          worker for just that field.
+      "unclassified"            -- no errors matched any known shape.
+    """
+    paths = [(e.field_path, e.code) for e in errors]
+
+    if any(p == "worker_status" for p, _ in paths):
+        return "worker_reported_failure"
+    if any((p == "nodes" and c == "OUT_OF_RANGE") or p.endswith(".provenance.confidence")
+           for p, c in paths):
+        return "capacity_violation"
+    if any(p in ("job_id", "worker_id") or p == "nodes" or p.endswith(".type")
+           or p.endswith(".id") for p, _ in paths):
+        return "structural_mismatch"
+    if any(p.startswith("traces") for p, _ in paths):
+        return "trace_integrity"
+    if any(p.startswith("nodes[") for p, _ in paths):
+        return "reparable_field_error"
+    return "unclassified"
+
+
+# ============================================================================
 # SPAWNER
 # ============================================================================
 

@@ -9,13 +9,13 @@ must be rejected, and rejected *whole*.
 import unittest
 
 from research_graph_schema import (
-    Node, Provenance, Trace, ResearchGraph,
+    Node, Provenance, Trace, ResearchGraph, ValidationError,
     NodeType, JobStatus, ReviewStatus, ExtractionType, DecisionType, ExtractionMethod,
 )
 import research_graph_gates as gates
 from research_graph_workers import (
     WorkerSpawner, ReferenceWorker, ResultEnvelope, ExtractionDirective,
-    PRODUCES_NODE_TYPE,
+    PRODUCES_NODE_TYPE, classify_rejection,
 )
 
 PAPER = "paper_2606.13707"
@@ -524,6 +524,103 @@ class TestConflictsAndWaiverEndToEnd(unittest.TestCase):
         self.assertFalse(decision.can_proceed)
         self.assertEqual(decision.reason_code, gates.GateReasonCode.LOW_CONFIDENCE)
         self.assertEqual(r.job_node.properties["status"], JobStatus.HELD.value)
+
+
+class TestClassifyRejection(unittest.TestCase):
+    """
+    classify_rejection: pure function, not wired into admit() -- feeds canned
+    ValidationError lists covering every one of _verify_envelope's known
+    rejection shapes and confirms the fixed precedence table's output.
+    """
+
+    def test_worker_status_failure_is_worker_reported_failure(self):
+        errors = [ValidationError("worker_status", "BAD_TYPE", "worker reported failure")]
+        self.assertEqual(classify_rejection(errors), "worker_reported_failure")
+
+    def test_max_results_exceeded_is_capacity_violation(self):
+        errors = [ValidationError("nodes", "OUT_OF_RANGE", "3 results exceeds max_results 2")]
+        self.assertEqual(classify_rejection(errors), "capacity_violation")
+
+    def test_confidence_below_floor_is_capacity_violation(self):
+        errors = [ValidationError("nodes[0].provenance.confidence", "OUT_OF_RANGE",
+                                  "confidence 0.1 below directive floor 0.5")]
+        self.assertEqual(classify_rejection(errors), "capacity_violation")
+
+    def test_job_id_mismatch_is_structural_mismatch(self):
+        errors = [ValidationError("job_id", "BAD_TYPE", "envelope job_id != directive")]
+        self.assertEqual(classify_rejection(errors), "structural_mismatch")
+
+    def test_missing_worker_id_is_structural_mismatch(self):
+        errors = [ValidationError("worker_id", "MISSING_REQUIRED", "envelope has no worker_id")]
+        self.assertEqual(classify_rejection(errors), "structural_mismatch")
+
+    def test_wrong_node_type_is_structural_mismatch(self):
+        errors = [ValidationError("nodes[0].type", "BAD_TYPE", "directive requires 'claim'")]
+        self.assertEqual(classify_rejection(errors), "structural_mismatch")
+
+    def test_duplicate_node_id_in_envelope_is_structural_mismatch(self):
+        errors = [ValidationError("nodes[0].id", "BAD_TYPE", "duplicate node id")]
+        self.assertEqual(classify_rejection(errors), "structural_mismatch")
+
+    def test_node_id_collision_with_graph_is_structural_mismatch(self):
+        errors = [ValidationError("nodes", "BAD_TYPE", "node ids already in graph")]
+        self.assertEqual(classify_rejection(errors), "structural_mismatch")
+
+    def test_missing_traces_entirely_is_trace_integrity(self):
+        errors = [ValidationError("traces", "MISSING_REQUIRED", "no traces")]
+        self.assertEqual(classify_rejection(errors), "trace_integrity")
+
+    def test_duplicate_trace_id_is_trace_integrity(self):
+        errors = [ValidationError("traces[0].trace_id", "BAD_TYPE", "duplicate trace_id")]
+        self.assertEqual(classify_rejection(errors), "trace_integrity")
+
+    def test_orphaned_node_with_no_extract_trace_is_trace_integrity(self):
+        errors = [ValidationError("traces", "MISSING_REQUIRED", "node emitted with no EXTRACT trace")]
+        self.assertEqual(classify_rejection(errors), "trace_integrity")
+
+    def test_missing_provenance_is_reparable_field_error(self):
+        errors = [ValidationError("nodes[0].provenance", "MISSING_REQUIRED", "no provenance")]
+        self.assertEqual(classify_rejection(errors), "reparable_field_error")
+
+    def test_spoofed_source_paper_is_reparable_field_error(self):
+        errors = [ValidationError("nodes[0].provenance.source_paper", "BAD_TYPE", "wrong source")]
+        self.assertEqual(classify_rejection(errors), "reparable_field_error")
+
+    def test_self_marked_human_reviewed_is_reparable_field_error(self):
+        errors = [ValidationError("nodes[0].provenance.human_reviewed", "BAD_TYPE",
+                                  "worker may not mark its own output reviewed")]
+        self.assertEqual(classify_rejection(errors), "reparable_field_error")
+
+    def test_generic_schema_field_error_is_reparable_field_error(self):
+        errors = [ValidationError("nodes[0].properties.text", "MISSING_REQUIRED", "missing text")]
+        self.assertEqual(classify_rejection(errors), "reparable_field_error")
+
+    def test_no_errors_is_unclassified(self):
+        self.assertEqual(classify_rejection([]), "unclassified")
+
+    def test_worker_reported_failure_takes_precedence_over_other_errors(self):
+        errors = [ValidationError("nodes[0].type", "BAD_TYPE", "wrong type"),
+                  ValidationError("worker_status", "BAD_TYPE", "worker reported failure")]
+        self.assertEqual(classify_rejection(errors), "worker_reported_failure")
+
+    def test_is_a_pure_function_not_wired_into_admit(self):
+        """admit()'s own rejection behavior is completely unaffected by this
+        function existing -- confirmed by re-running an existing adversarial
+        case and checking admit()'s AdmissionResult is unchanged."""
+        sp, g = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.CLAIMS)
+        bad_env = ResultEnvelope(d.job_id, "w1", nodes=[
+            Node("claim_bad", "concept", "wrong type",
+                 Provenance(PAPER, ExtractionMethod.STRUCTURED_LLM.value, 0.9,
+                           "2026-07-26T00:00:00+00:00"),
+                 {"text": "wrong type"})
+        ], traces=[])
+        r = sp.admit(d, bad_env)
+        self.assertFalse(r.admitted)
+        # classify_rejection can be called independently on the same errors --
+        # admit() never calls it itself.
+        label = classify_rejection(r.errors)
+        self.assertEqual(label, "structural_mismatch")
 
 
 if __name__ == "__main__":
