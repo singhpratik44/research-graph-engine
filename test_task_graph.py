@@ -191,5 +191,118 @@ class TestSchedulerFailurePropagation(unittest.TestCase):
         self.assertIn("independent", result.completed)
 
 
+class TestSchedulerAdaptiveRetry(unittest.TestCase):
+    """
+    gap_adaptive_recovery: a failing task can be retried up to `max_retries`
+    times before being marked FAILED (and cascading SKIPPED to dependents).
+    `max_retries=0` (the default) must reproduce the old immediate-FAILED
+    behavior exactly -- proven here alongside the retry path itself.
+    """
+
+    def test_default_max_retries_is_zero_and_fails_immediately(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def failing_executor(task_id):
+            calls.append(task_id)
+            raise RuntimeError("boom")
+
+        result = Scheduler(dag).run(failing_executor)
+        self.assertEqual(len(calls), 1, "no retry should happen with the default max_retries=0")
+        self.assertIn("a", result.failed)
+        span = result.spans[0]
+        self.assertEqual(span.status, TaskStatus.FAILED.value)
+        self.assertEqual(span.attempts, 1)
+        self.assertEqual(span.retry_errors, [])
+
+    def test_task_retries_and_succeeds_on_a_later_attempt(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def flaky_executor(task_id):
+            calls.append(task_id)
+            if len(calls) < 2:
+                raise RuntimeError("transient failure")
+            return {"confidence": 0.8}
+
+        result = Scheduler(dag, max_retries=1).run(flaky_executor)
+        self.assertEqual(len(calls), 2, "executor must actually be invoked again, not just pass eventually")
+        self.assertIn("a", result.completed)
+        self.assertNotIn("a", result.failed)
+        span = result.spans[0]
+        self.assertEqual(len(result.spans), 1, "still exactly one span for the task")
+        self.assertEqual(span.status, TaskStatus.COMPLETED.value)
+        self.assertEqual(span.attempts, 2)
+        self.assertEqual(len(span.retry_errors), 1)
+        self.assertIn("transient failure", span.retry_errors[0])
+        self.assertEqual(span.confidence, 0.8)
+
+    def test_retries_are_bounded_and_task_still_fails_when_exhausted(self):
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        calls = []
+
+        def always_failing_executor(task_id):
+            calls.append(task_id)
+            raise RuntimeError("boom")
+
+        result = Scheduler(dag, max_retries=2).run(always_failing_executor)
+        self.assertEqual(len(calls), 3, "1 original attempt + 2 retries, then stop -- bound is real")
+        self.assertIn("a", result.failed)
+        span = result.spans[0]
+        self.assertEqual(span.attempts, 3)
+        self.assertEqual(len(span.retry_errors), 2)
+        self.assertIn("boom", span.error)
+
+    def test_a_task_that_succeeds_on_retry_lets_its_dependent_run(self):
+        # Proves retries interact correctly with the dependency scheduler: a task
+        # that eventually succeeds must NOT cascade SKIPPED to its dependents.
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        dag.add_task("b", "b")
+        dag.add_dependency("b", depends_on="a")
+
+        calls = []
+
+        def executor(task_id):
+            if task_id == "a":
+                calls.append(task_id)
+                if len(calls) < 2:
+                    raise RuntimeError("transient")
+            return {"confidence": 1.0}
+
+        result = Scheduler(dag, max_retries=1).run(executor)
+        self.assertTrue(result.all_succeeded)
+        self.assertIn("a", result.completed)
+        self.assertIn("b", result.completed)
+        self.assertNotIn("b", result.skipped)
+
+    def test_max_retries_zero_reproduces_every_failure_propagation_fixture(self):
+        """Re-run the existing failure-propagation fixture with the default
+        Scheduler (max_retries=0) and confirm the outcome is identical to
+        test_dependent_of_a_failed_task_is_skipped_not_run above."""
+        dag = TaskDAG()
+        dag.add_task("a", "a")
+        dag.add_task("b", "b")
+        dag.add_dependency("b", depends_on="a")
+
+        ran = []
+
+        def executor(task_id):
+            ran.append(task_id)
+            if task_id == "a":
+                raise RuntimeError("a failed")
+            return {"confidence": 1.0}
+
+        result = Scheduler(dag).run(executor)
+        self.assertIn("a", result.failed)
+        self.assertIn("b", result.skipped)
+        self.assertNotIn("b", ran)
+        self.assertFalse(result.all_succeeded)
+        self.assertEqual(ran.count("a"), 1, "no retry attempted with the default max_retries=0")
+
+
 if __name__ == "__main__":
     unittest.main()

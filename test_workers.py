@@ -216,6 +216,148 @@ class TestUntrustedWorker(unittest.TestCase):
             self.sp.admit(d, ResultEnvelope("job_nope", "w1"))
 
 
+class TestAdaptiveRetry(unittest.TestCase):
+    """
+    gap_adaptive_recovery: a rejected envelope can be retried with a
+    diagnose-and-regenerate function instead of failing wholesale. Bounded by
+    max_retries, and every attempt -- successful or not -- stays on the job's
+    record (retry_attempts / retry_count / original_failure), not silently
+    overwritten. retry_with=None (the default) must reproduce today's
+    fail-whole-on-first-rejection behavior exactly.
+    """
+
+    def setUp(self):
+        self.sp, self.g = spawner()
+        self.job, self.d = self.sp.spawn(PAPER, ExtractionType.CONCEPTS)
+        self.d.confidence_floor = 0.6
+
+    def _concept(self, nid="concept_x", conf=0.9):
+        return Node(nid, NodeType.CONCEPT.value, "x",
+                    Provenance(PAPER, ExtractionMethod.KEYWORD.value, conf,
+                              "2026-07-26T00:00:00+00:00"),
+                    {"text": "x"})
+
+    def _trace(self, refs=("concept_x",), **kw):
+        base = dict(trace_id="t1", decision_type=DecisionType.EXTRACT, worker_id="w1",
+                    confidence=0.9, reason_code="R", reasoning_summary="s",
+                    output_refs=list(refs))
+        base.update(kw)
+        return Trace(**base)
+
+    def _below_floor_env(self):
+        # conf=0.3 < floor 0.6 -- rejected with the "should have been SKIPped" error.
+        return ResultEnvelope(self.d.job_id, "w1", [self._concept(conf=0.3)], [self._trace()])
+
+    # -- retry succeeds -----------------------------------------------------
+
+    def test_retry_with_is_called_with_the_actual_validation_errors(self):
+        calls = []
+
+        def retry_with(directive, errors):
+            calls.append(errors)
+            return ResultEnvelope(directive.job_id, "w1",
+                                  [self._concept(conf=0.9)], [self._trace()])
+
+        r = self.sp.admit(self.d, self._below_floor_env(), retry_with=retry_with)
+        self.assertTrue(r.admitted)
+        self.assertEqual(len(calls), 1, "retry_with must be called exactly once here")
+        # It saw *why* the first attempt was rejected, not just that it failed.
+        self.assertTrue(any("should have been SKIPped" in e.message for e in calls[0]),
+                        [e.message for e in calls[0]])
+
+    def test_successful_retry_records_original_failure_and_retry_count(self):
+        def retry_with(directive, errors):
+            return ResultEnvelope(directive.job_id, "w1",
+                                  [self._concept(conf=0.9)], [self._trace()])
+
+        r = self.sp.admit(self.d, self._below_floor_env(), retry_with=retry_with)
+        self.assertTrue(r.admitted)
+        self.assertEqual(r.job_node.properties["retry_count"], 1)
+        self.assertEqual(len(r.job_node.properties["retry_attempts"]), 1)
+        original = r.job_node.properties["original_failure"]
+        self.assertTrue(any("should have been SKIPped" in e["message"] for e in original))
+
+    def test_admitted_graph_after_a_successful_retry_is_valid(self):
+        def retry_with(directive, errors):
+            return ResultEnvelope(directive.job_id, "w1",
+                                  [self._concept(conf=0.9)], [self._trace()])
+
+        r = self.sp.admit(self.d, self._below_floor_env(), retry_with=retry_with)
+        self.assertTrue(r.admitted)
+        self.assertEqual(r.nodes_admitted, 1)
+        self.assertTrue(self.g.validate().valid)
+
+    # -- retries are bounded --------------------------------------------
+
+    def test_retries_are_bounded_and_still_fail_when_exhausted(self):
+        calls = []
+
+        def always_bad_retry(directive, errors):
+            calls.append(errors)
+            return ResultEnvelope(directive.job_id, "w1",
+                                  [self._concept(conf=0.1)], [self._trace()])
+
+        r = self.sp.admit(self.d, self._below_floor_env(),
+                          retry_with=always_bad_retry, max_retries=2)
+        self.assertFalse(r.admitted)
+        self.assertEqual(len(calls), 2,
+                         "retry_with must be called exactly max_retries times, not infinitely")
+        self.assertEqual(r.job_node.properties["status"], JobStatus.FAILED.value)
+        self.assertEqual(r.job_node.properties["retry_count"], 2)
+        self.assertEqual(len(r.job_node.properties["retry_attempts"]), 3)
+        self.assertEqual(r.nodes_admitted, 0)
+        self.assertEqual(len(self.g.nodes), 1, "no nodes from any failed attempt leak into the graph")
+
+    def test_default_max_retries_of_one_stops_after_a_single_retry(self):
+        calls = []
+
+        def always_bad_retry(directive, errors):
+            calls.append(errors)
+            return ResultEnvelope(directive.job_id, "w1",
+                                  [self._concept(conf=0.1)], [self._trace()])
+
+        r = self.sp.admit(self.d, self._below_floor_env(), retry_with=always_bad_retry)
+        self.assertFalse(r.admitted)
+        self.assertEqual(len(calls), 1, "max_retries defaults to 1")
+        self.assertEqual(r.job_node.properties["retry_count"], 1)
+
+    # -- retry_with=None is byte-for-byte today's behavior ------------------
+
+    def test_default_admit_has_no_retry_bookkeeping_and_fails_on_first_attempt(self):
+        r = self.sp.admit(self.d, self._below_floor_env())
+        self.assertFalse(r.admitted)
+        self.assertEqual(r.job_node.properties["status"], JobStatus.FAILED.value)
+        self.assertEqual(r.job_node.properties["result_count"], 0)
+        for key in ("retry_attempts", "retry_count", "original_failure"):
+            self.assertNotIn(key, r.job_node.properties,
+                             f"{key!r} must not appear when retry_with is not supplied")
+
+    def test_retry_with_not_invoked_when_first_attempt_already_succeeds(self):
+        good_env = ResultEnvelope(self.d.job_id, "w1", [self._concept(conf=0.9)], [self._trace()])
+        calls = []
+
+        def retry_with(directive, errors):
+            calls.append(errors)
+            return good_env
+
+        r = self.sp.admit(self.d, good_env, retry_with=retry_with)
+        self.assertTrue(r.admitted)
+        self.assertEqual(calls, [], "retry_with must not be called when nothing failed")
+        self.assertNotIn("retry_count", r.job_node.properties)
+
+    def test_every_existing_untrusted_worker_case_is_unchanged_by_default(self):
+        """Re-run one of TestUntrustedWorker's adversarial cases through the same
+        spawner/job, with no retry_with, and confirm it is rejected exactly as
+        before -- proving the new parameter is opt-in, not a behavior change."""
+        bad = Node("claim_x", NodeType.CLAIM.value, "x",
+                  Provenance(PAPER, ExtractionMethod.KEYWORD.value, 0.9, "t"), {"text": "x"})
+        env = ResultEnvelope(self.d.job_id, "w1", [bad], [self._trace(refs=["claim_x"])])
+        r = self.sp.admit(self.d, env)
+        self.assertFalse(r.admitted)
+        self.assertEqual(r.job_node.properties["status"], JobStatus.FAILED.value)
+        self.assertTrue(any("directive requires 'concept'" in e.message for e in r.errors))
+
+
 class TestDirectiveIsHonoredByReferenceWorker(unittest.TestCase):
 
     def test_worker_respects_confidence_floor_and_traces_the_skip(self):
