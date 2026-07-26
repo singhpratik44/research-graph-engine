@@ -434,5 +434,148 @@ class TestGateLogic(unittest.TestCase):
         self.assertEqual(decision.reason_code, GateReasonCode.ALLOWED)
 
 
+# ============================================================================
+# Test: CLAIM_NOT_ENTAILED path (gap_claim_source_verify)
+#
+# `_check_provenance_present` only checks a `source_paper` is a non-empty
+# string; it says nothing about whether the source actually supports the
+# claim's text. `_check_claim_entailed` + `entailment_checker` closes that
+# gap, but must default to a no-op pass -- every test above this comment was
+# written before this check existed and must keep passing unmodified.
+# See test_claim_verification.py for the pluggable default implementation
+# (claim_verification.keyword_overlap_entailment_checker) and the real
+# qih_stress_corpus.py light-angle case this was built to catch.
+# ============================================================================
+
+class TestClaimEntailedCheck(unittest.TestCase):
+
+    def _claim_node(self, node_id="claim_test", confidence=0.9, human_reviewed=True):
+        return Node(
+            id=node_id,
+            type="claim",
+            label="test claim",
+            provenance=Provenance(
+                source_paper="paper_test",
+                extraction_method="structured_llm",
+                confidence=confidence,
+                extracted_at=datetime.now().isoformat(),
+                human_reviewed=human_reviewed,
+            ),
+            properties={"text": "test claim text", "subject": "x", "object": "y"},
+        )
+
+    def test_default_gate_has_no_entailment_checker(self):
+        gate = WorkflowGate()
+        self.assertIsNone(gate.entailment_checker)
+
+    def test_unconfigured_check_is_a_no_op_pass_for_a_claim(self):
+        """The default (entailment_checker=None) must never block a claim on
+        its own -- this is the guarantee that keeps every pre-existing test
+        in this file (and every other gate/schema test) passing unmodified."""
+        gate = WorkflowGate(confidence_threshold=0.7, require_human_review=True)
+        node = self._claim_node()
+        decision = gate.should_unlock_next_stage(node)
+
+        entail_check = [c for c in decision.checks if c.check_name == "claim_entailed"][0]
+        self.assertTrue(entail_check.passed)
+        self.assertEqual(entail_check.evidence["checked"], False)
+        # Claims are terminal regardless -- the no-op check must not change that.
+        self.assertEqual(decision.reason_code, GateReasonCode.DOWNSTREAM_NOT_ALLOWED)
+
+    def test_unconfigured_check_is_a_no_op_for_non_claim_types_too(self):
+        gate = WorkflowGate()
+        node = Node(
+            id="concept_test", type="concept", label="test",
+            provenance=Provenance("paper_test", "keyword", 0.9,
+                                  datetime.now().isoformat(), human_reviewed=True),
+            properties={"text": "test"},
+        )
+        decision = gate.should_unlock_next_stage(node)
+        entail_check = [c for c in decision.checks if c.check_name == "claim_entailed"][0]
+        self.assertTrue(entail_check.passed)
+        self.assertEqual(entail_check.evidence, {"checked": False, "node_type": "concept"})
+
+    def test_configured_checker_returning_false_blocks_with_new_reason_code(self):
+        gate = WorkflowGate(entailment_checker=lambda node, graph: False)
+        node = self._claim_node()
+        decision = gate.should_unlock_next_stage(node)
+
+        self.assertFalse(decision.can_proceed)
+        self.assertEqual(decision.reason_code, GateReasonCode.CLAIM_NOT_ENTAILED)
+        entail_check = [c for c in decision.checks if c.check_name == "claim_entailed"][0]
+        self.assertFalse(entail_check.passed)
+        self.assertEqual(entail_check.evidence["source_paper"], "paper_test")
+
+    def test_configured_checker_runs_before_confidence_check(self):
+        """Entailment is checked earlier in the sequence than confidence -- a
+        claim that would ALSO fail on confidence should still be reported as
+        CLAIM_NOT_ENTAILED, not LOW_CONFIDENCE, matching how earlier checks
+        already win over later ones elsewhere in this file (see
+        test_gate_reason_code_matches_first_failure)."""
+        gate = WorkflowGate(entailment_checker=lambda node, graph: False)
+        node = self._claim_node(confidence=0.1)  # also fails confidence
+        decision = gate.should_unlock_next_stage(node)
+
+        self.assertEqual(decision.reason_code, GateReasonCode.CLAIM_NOT_ENTAILED)
+        checked_names = [c.check_name for c in decision.checks]
+        self.assertIn("claim_entailed", checked_names)
+        self.assertNotIn("confidence_above_threshold", checked_names)
+
+    def test_configured_checker_returning_true_lets_claim_proceed_past_entailment(self):
+        gate = WorkflowGate(entailment_checker=lambda node, graph: True)
+        node = self._claim_node()
+        decision = gate.should_unlock_next_stage(node)
+
+        entail_check = [c for c in decision.checks if c.check_name == "claim_entailed"][0]
+        self.assertTrue(entail_check.passed)
+        # Still terminal at the gate -- passing entailment isn't the same as ALLOWED.
+        self.assertEqual(decision.reason_code, GateReasonCode.DOWNSTREAM_NOT_ALLOWED)
+
+    def test_configured_checker_is_never_invoked_for_non_claim_nodes(self):
+        """Deliberately-broken-expectation guard: a spy checker that always
+        returns False would incorrectly block every node type if the gate
+        failed to scope this check to claims. Prove it's never called."""
+        calls = []
+
+        def spy(node, graph):
+            calls.append(node.id)
+            return False
+
+        gate = WorkflowGate(entailment_checker=spy)
+        node = Node(
+            id="job_test", type="extraction_job", label="test",
+            provenance=Provenance("paper_test", "job_spawn", 1.0,
+                                  datetime.now().isoformat(), human_reviewed=True),
+            properties={"job_id": "job_test", "paper_id": "paper_test",
+                       "extraction_type": "claims", "status": "completed"},
+        )
+        decision = gate.should_unlock_next_stage(node)
+        self.assertEqual(calls, [])
+        self.assertTrue(decision.can_proceed)
+
+    def test_checker_is_called_with_node_and_graph(self):
+        """Proves the gate actually threads (node, graph) through to the
+        checker rather than calling it with the wrong arguments or ignoring
+        the graph -- a checker that needs graph context (e.g. to look up the
+        cited paper) must receive it."""
+        received = {}
+
+        def recorder(node, graph):
+            received["node_id"] = node.id
+            received["graph"] = graph
+            return True
+
+        sentinel_graph = object()
+        gate = WorkflowGate(entailment_checker=recorder)
+        node = self._claim_node(node_id="claim_recorder")
+        gate.should_unlock_next_stage(node, sentinel_graph)
+
+        self.assertEqual(received["node_id"], "claim_recorder")
+        self.assertIs(received["graph"], sentinel_graph)
+
+    def test_claim_not_entailed_reason_code_exists(self):
+        self.assertEqual(GateReasonCode.CLAIM_NOT_ENTAILED.value, "CLAIM_NOT_ENTAILED")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
