@@ -89,6 +89,47 @@ moves to the next item after `make validate` is green and a human has merged.
   Only `gap_multidim_review` (12 papers, the corpus's best-attested gap)
   remains open — and it's exactly what the specialist agent split below
   addresses. Full suite: 365 tests passing.
+- Three literature-informed robustness improvements (ad hoc, not part of
+  the sequenced roadmap — like the QIH stress-test corpus above, these
+  came from a dedicated research pass rather than from working the
+  backlog in order). 10 real studies/posts from the last ~3 months,
+  filtered through robustness → graph-theory → agentic-architecture
+  lenses, informed three additive changes, all purely additive (every
+  pre-existing test passes unmodified):
+  - **Fault localization** (`task_graph.TaskDAG.failed_ancestors`). A
+    SKIPPED task's span now names which upstream task(s) actually failed
+    — a transitive closure over the DAG's existing `DEPENDS_ON` edges —
+    replacing the generic `"unreachable: a dependency failed"` message.
+    Deliberately does *not* add a second, confidence-graded edge layer
+    (as one literature source proposes): a dependency here either failed
+    or it didn't, so the existing single edge type is exact, not an
+    approximation, and a second layer would only risk polluting
+    `detect_cycles()` for no benefit.
+  - **Failure-class recovery dispatch** (`task_graph.Scheduler`'s new
+    `failure_classifier`/`retry_policy` params; `research_graph_workers
+    .classify_rejection()`). A failure's classified label can grant a
+    different retry budget than the flat `max_retries`, so different
+    failure classes get different recovery budgets instead of one
+    undifferentiated retry count. Both default to `None`, reproducing
+    today's flat-retry behavior exactly. `classify_rejection()` is a
+    standalone pure function classifying `admit()`'s 18 known rejection
+    shapes into 5 broad classes — not wired into `admit()` itself, which
+    is completely unchanged; a caller's own `retry_with` can consult it.
+  - **Atomic claim-entailment decomposition** (`claim_verification
+    .atomic_entailment_checker`/`atomic_entailment_report`). Scores each
+    clause of a compound claim independently and requires the *weakest*
+    to clear the bar, instead of one holistic bag-of-words score — a
+    single unsupported clause in an otherwise-plausible claim can no
+    longer hide behind the rest. Same drop-in `Callable[[Node, Graph],
+    bool]` signature as `keyword_overlap_entailment_checker` (left
+    completely unmodified); `research_graph_gates.py` is untouched, since
+    the `CLAIM_NOT_ENTAILED`-before-`LOW_CONFIDENCE` short-circuit
+    ordering is a property of the gate's fixed check sequence, not of
+    which checker is configured. Per-atom detail lives only in the
+    separate `atomic_entailment_report()` diagnostic, not in the gate's
+    `CheckTrace.evidence`.
+
+  Full suite: 441 tests passing.
 
 ## Next
 
