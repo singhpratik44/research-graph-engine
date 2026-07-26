@@ -45,6 +45,15 @@ autonomous run works under (one bounded roadmap item, branch-only, full
 validation before done, structured report at the end), and `ROADMAP.md`
 sequences what's next one item at a time rather than as an open pile.
 
+## The UI, as a human sees it
+
+The overview page and the review queue — the same gate reason codes shown
+above, surfaced for a human who will never read the Python:
+
+![Overview page: node counts by type, extraction job status, review task status, and an at-a-glance summary](docs/webapp-overview.png)
+
+![Review queue: a held job with its exact gate reason (LOW_CONFIDENCE: Confidence 59% below threshold 70%)](docs/webapp-review-queue.png)
+
 ## Quickstart
 
 ```bash
