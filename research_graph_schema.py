@@ -21,7 +21,7 @@ from enum import Enum
 from datetime import datetime, timezone
 import json
 
-SCHEMA_VERSION = "3.0.0"
+SCHEMA_VERSION = "3.1.0"
 
 
 # ============================================================================
@@ -38,6 +38,8 @@ class NodeType(str, Enum):
     BENCHMARK = "benchmark"
     EXTRACTION_JOB = "extraction_job"
     REVIEW_TASK = "review_task"
+    MEMORY_RECORD = "memory_record"   # graph memory: task outcomes, claim decisions,
+                                      # reviewer disagreements, blocked reasons, repairs
 
 
 class EdgeType(str, Enum):
@@ -53,6 +55,13 @@ class EdgeType(str, Enum):
     PROPOSES = "proposes"
     USES_METHOD = "uses_method"
     PRODUCES = "produces"
+    # Graph memory (typed, so memory is more than a flat log -- see graph_memory.py,
+    # which subsumes the old gap_typed_provenance_edges backlog item).
+    SUPPORTED_BY = "supported_by"       # claim -> memory_record: claim accepted, this is why
+    REJECTED_BECAUSE = "rejected_because"  # claim -> memory_record: claim rejected, this is why
+    DISAGREED_ON = "disagreed_on"       # memory_record -> any node: reviewers disagreed on it
+    REPAIRED_VIA = "repaired_via"       # any node -> memory_record: this is how it got fixed
+    DERIVED_FROM = "derived_from"       # memory_record -> any node: computed from that node
     # Gate control (workflow-as-data)
     REQUIRES_REVIEW = "requires_review"   # extraction_job -> review_task
     APPROVED_FOR = "approved_for"         # review_task -> extraction_job
@@ -67,12 +76,20 @@ GATE_CONTROL_EDGES = frozenset({
     EdgeType.UNLOCKS,
 })
 
-# Endpoint contract for gate-control edges: (allowed source types, allowed target types)
+# Endpoint contract for structurally-constrained edges: (allowed source types, allowed
+# target types). Originally just the four gate-control edges above; SUPPORTED_BY and
+# REJECTED_BECAUSE join them because graph_memory.py only ever uses them claim -> memory
+# record, so the same fixed-endpoint discipline applies. DISAGREED_ON/REPAIRED_VIA/
+# DERIVED_FROM are deliberately left out: their non-memory endpoint can legitimately be
+# any node type (a disagreement or a repair can be about a claim, a job, a concept...),
+# so there's no fixed set to enforce here.
 EDGE_ENDPOINT_CONTRACT: Dict[EdgeType, Any] = {
     EdgeType.REQUIRES_REVIEW: ({NodeType.EXTRACTION_JOB}, {NodeType.REVIEW_TASK}),
     EdgeType.APPROVED_FOR:    ({NodeType.REVIEW_TASK}, {NodeType.EXTRACTION_JOB}),
     EdgeType.BLOCKED_BY:      ({NodeType.EXTRACTION_JOB}, {NodeType.EXTRACTION_JOB}),
     EdgeType.UNLOCKS:         ({NodeType.EXTRACTION_JOB}, {NodeType.EXTRACTION_JOB}),
+    EdgeType.SUPPORTED_BY:    ({NodeType.CLAIM}, {NodeType.MEMORY_RECORD}),
+    EdgeType.REJECTED_BECAUSE: ({NodeType.CLAIM}, {NodeType.MEMORY_RECORD}),
 }
 
 
@@ -124,6 +141,17 @@ class ExtractionMethod(str, Enum):
     HUMAN_ANNOTATION = "human_annotation"
     JOB_SPAWN = "job_spawn"
     GATE_HOLD = "gate_hold"
+    MEMORY_WRITE = "memory_write"   # graph_memory.py: a memory_record, not an extraction
+
+
+class MemoryKind(str, Enum):
+    """What a NodeType.MEMORY_RECORD node records. See graph_memory.py."""
+    TASK_OUTCOME = "task_outcome"                 # a task_graph.TaskSpan's result
+    CLAIM_ACCEPTED = "claim_accepted"              # a claim that passed the gate
+    CLAIM_REJECTED = "claim_rejected"              # a claim a human reviewer rejected
+    REVIEWER_DISAGREEMENT = "reviewer_disagreement"  # two humans disagreeing on one node
+    BLOCKED_REASON = "blocked_reason"              # a GateDecision's block, persisted
+    REPAIR_PATTERN = "repair_pattern"              # how a rejected/blocked item got fixed
 
 
 def _now() -> str:
@@ -357,6 +385,14 @@ NODE_SCHEMA: Dict[NodeType, List[FieldSpec]] = {
     NodeType.METHOD: [FieldSpec("text", str, required=True)],
     NodeType.DOMAIN: [FieldSpec("text", str, required=True)],
     NodeType.BENCHMARK: [FieldSpec("text", str, required=True)],
+    NodeType.MEMORY_RECORD: [
+        FieldSpec("memory_kind", str, required=True, enum=MemoryKind),
+        FieldSpec("summary", str, required=True),
+        FieldSpec("recorded_at", str, required=True),
+        FieldSpec("subject_ref", str, required=True),
+        FieldSpec("confidence", float, min_value=0.0, max_value=1.0),
+        FieldSpec("details", dict),
+    ],
 }
 
 
