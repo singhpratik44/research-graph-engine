@@ -35,7 +35,7 @@ Be honest about what this is and is not:
     should be trusted as ground truth.
 """
 
-from typing import Any, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 import re
 
 # Small, deliberately generic function-word list -- enough to keep the overlap
@@ -133,3 +133,112 @@ def keyword_overlap_entailment_checker(node: Any, graph: Any = None, threshold: 
     small wrapper lambda if a deployment needs a stricter or looser bar.
     """
     return word_overlap_score(node, graph) >= threshold
+
+
+# ============================================================================
+# ATOMIC CLAIM-ENTAILMENT DECOMPOSITION
+#
+# word_overlap_score() above flattens a claim's whole text+subject+object into
+# ONE bag of words before scoring -- a claim with several sub-assertions
+# joined by "and" can have a single well-supported clause carry the whole
+# claim's score past threshold while a completely unsupported clause rides
+# along unnoticed. The functions below score each clause independently and
+# require the WEAKEST one to clear the bar, so one unsupported atom in an
+# otherwise-plausible run-on sentence can't hide behind the others.
+#
+# Purely additive: word_overlap_score/keyword_overlap_entailment_checker above
+# are completely unmodified. research_graph_gates.py is untouched too -- the
+# CLAIM_NOT_ENTAILED-before-LOW_CONFIDENCE short-circuit ordering is a
+# property of WorkflowGate.should_unlock_next_stage's fixed check sequence,
+# independent of which bool-returning checker is configured, so no gate
+# change is needed for atomic_entailment_checker to plug in the same way
+# keyword_overlap_entailment_checker does. Per-atom detail is exposed only
+# via the separate atomic_entailment_report() diagnostic below, not wired
+# into the gate's CheckTrace.evidence -- CheckTrace is one-per-check with a
+# fixed evidence shape every existing test relies on; richer detail belongs
+# in a function a caller (evals, a review UI) can call directly instead.
+# ============================================================================
+
+_ATOM_SPLIT_RE = re.compile(r"\s*;\s*|,?\s+(?:and|but|or)\s+", re.IGNORECASE)
+
+
+def _split_atoms(text: str) -> List[str]:
+    """
+    Deliberately dumb clause splitter -- same dumbness level as
+    ReferenceWorker's regex-based extraction in research_graph_workers.py.
+    Splits only on semicolons and coordinating conjunctions (and/but/or);
+    no real parsing, no clause-boundary detection beyond that.
+    """
+    if not text:
+        return []
+    return [p.strip() for p in _ATOM_SPLIT_RE.split(text) if p and p.strip()]
+
+
+def _claim_atoms(node: Any) -> List[str]:
+    """
+    A claim's atomic pieces: its text split into clauses, plus its subject
+    and object each as their own atom -- the same three properties
+    _claim_tokens() already flattens into one bag, just kept separate here.
+    """
+    props = getattr(node, "properties", None) or {}
+    atoms = _split_atoms(props.get("text", ""))
+    for extra in (props.get("subject", ""), props.get("object", "")):
+        if extra:
+            atoms.append(extra)
+    return atoms
+
+
+def _atom_scores(node: Any, graph: Any = None) -> List[float]:
+    """Per-atom word-overlap score against the cited paper's tokens -- reuses
+    the same _tokenize/_find_paper/_paper_tokens/_source_paper_id helpers
+    word_overlap_score() uses, just applied once per atom instead of once
+    over the whole claim."""
+    paper = _find_paper(graph, _source_paper_id(node))
+    paper_words = _paper_tokens(paper)
+    scores = []
+    for atom in _claim_atoms(node):
+        atom_words = _tokenize(atom)
+        if not atom_words or not paper_words:
+            scores.append(0.0)
+        else:
+            scores.append(len(atom_words & paper_words) / len(atom_words))
+    return scores
+
+
+def atomic_entailment_checker(node: Any, graph: Any = None, threshold: float = 0.15,
+                              atom_threshold: Optional[float] = None) -> bool:
+    """
+    Same Callable[[Node, Graph], bool] signature as
+    keyword_overlap_entailment_checker -- drop-in for
+    WorkflowGate(entailment_checker=...). Aggregation is the MINIMUM atom
+    score against `atom_threshold` (defaulting to `threshold` when not given
+    explicitly) -- stricter than keyword_overlap_entailment_checker's
+    single-bag average, so a single unsupported clause in an otherwise
+    plausible sentence can't hide behind the rest. A claim with no atoms at
+    all (empty text, no subject/object) is unsupported, not vacuously true.
+    """
+    bar = threshold if atom_threshold is None else atom_threshold
+    scores = _atom_scores(node, graph)
+    return bool(scores) and min(scores) >= bar
+
+
+def atomic_entailment_report(node: Any, graph: Any = None, threshold: float = 0.15,
+                             atom_threshold: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Pure diagnostic -- NOT wired into WorkflowGate. Callers who want to know
+    WHICH specific part of a claim failed to match its cited source (evals,
+    a future review UI) call this directly; the gate itself only ever sees
+    atomic_entailment_checker's single bool via _check_claim_entailed.
+    """
+    bar = threshold if atom_threshold is None else atom_threshold
+    atoms = _claim_atoms(node)
+    scores = _atom_scores(node, graph)
+    weakest_index = scores.index(min(scores)) if scores else None
+    return {
+        "atoms": atoms,
+        "scores": scores,
+        "atom_threshold": bar,
+        "weakest_atom": atoms[weakest_index] if weakest_index is not None else None,
+        "weakest_score": min(scores) if scores else None,
+        "entailed": bool(scores) and min(scores) >= bar,
+    }

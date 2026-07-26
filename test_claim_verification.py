@@ -331,5 +331,129 @@ class TestEntailmentCheckIsNoOpByDefault(unittest.TestCase):
         self.assertEqual(d4.reason_code, gates.GateReasonCode.DOWNSTREAM_NOT_ALLOWED)
 
 
+# ===========================================================================
+# atomic_entailment_checker / atomic_entailment_report: decomposed scoring
+# ===========================================================================
+
+class TestAtomicEntailmentChecker(unittest.TestCase):
+
+    def test_a_single_unsupported_clause_fails_even_though_whole_text_would_pass(self):
+        """Deliberate-break case, in the style of test_graph_evals.py's
+        TestQueryEvalsCatchARealBreak: a compound claim where the first clause
+        overlaps heavily with its source (whole-text score clears 0.15) but
+        the second clause shares nothing with it -- keyword_overlap_entailment_checker
+        passes this claim; atomic_entailment_checker must not."""
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        g = ResearchGraph(nodes=[paper, claim])
+
+        self.assertGreaterEqual(cv.word_overlap_score(claim, g), 0.15)
+        self.assertTrue(cv.keyword_overlap_entailment_checker(claim, g))
+        self.assertFalse(cv.atomic_entailment_checker(claim, g))
+
+    def test_light_angle_claim_still_fails_under_atomic_scoring(self):
+        """Parity case: the claim keyword_overlap_entailment_checker was built
+        to catch must still fail under the decomposed checker, not just the
+        holistic one."""
+        graph = qih.build_stress_graph()
+        claim = graph.index()["claim_light_angle_derives_gr"]
+        self.assertFalse(cv.atomic_entailment_checker(claim, graph))
+
+    def test_a_uniformly_well_supported_claim_passes(self):
+        paper = _paper("paper_y", "Flat Routing Increases Latency At Scale")
+        claim = _claim("claim_y", "paper_y",
+                       "Flat routing increases latency at scale.",
+                       "flat routing", "increases", "latency")
+        g = ResearchGraph(nodes=[paper, claim])
+        self.assertTrue(cv.atomic_entailment_checker(claim, g))
+
+    def test_claim_with_no_atoms_is_unsupported_not_vacuously_true(self):
+        claim = Node("claim_empty", NodeType.CLAIM.value, "",
+                     provenance=Provenance("paper_x", ExtractionMethod.STRUCTURED_LLM.value,
+                                          0.9, datetime.now().isoformat()),
+                     properties={"text": ""})
+        self.assertFalse(cv.atomic_entailment_checker(claim, ResearchGraph()))
+
+    def test_custom_atom_threshold_can_flip_the_verdict(self):
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        g = ResearchGraph(nodes=[paper, claim])
+        # A near-zero atom_threshold lets even the weak clause through.
+        self.assertTrue(cv.atomic_entailment_checker(claim, g, atom_threshold=0.0))
+
+
+class TestAtomicEntailmentReport(unittest.TestCase):
+
+    def test_report_shape_and_lengths_match(self):
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        g = ResearchGraph(nodes=[paper, claim])
+        report = cv.atomic_entailment_report(claim, g)
+        self.assertEqual(set(report.keys()),
+                         {"atoms", "scores", "atom_threshold", "weakest_atom",
+                          "weakest_score", "entailed"})
+        self.assertEqual(len(report["atoms"]), len(report["scores"]))
+        self.assertFalse(report["entailed"])
+        self.assertIn("quantum entanglement", report["weakest_atom"])
+        self.assertEqual(report["weakest_score"], 0.0)
+
+    def test_report_on_a_claim_with_no_atoms_has_none_weakest(self):
+        claim = Node("claim_empty", NodeType.CLAIM.value, "",
+                     provenance=Provenance("paper_x", ExtractionMethod.STRUCTURED_LLM.value,
+                                          0.9, datetime.now().isoformat()),
+                     properties={"text": ""})
+        report = cv.atomic_entailment_report(claim, ResearchGraph())
+        self.assertEqual(report["atoms"], [])
+        self.assertIsNone(report["weakest_atom"])
+        self.assertIsNone(report["weakest_score"])
+        self.assertFalse(report["entailed"])
+
+
+class TestAtomicCheckerPluggedIntoGate(unittest.TestCase):
+    """atomic_entailment_checker is a drop-in Callable[[Node, Graph], bool],
+    same as keyword_overlap_entailment_checker -- no research_graph_gates.py
+    change needed for the CLAIM_NOT_ENTAILED-before-LOW_CONFIDENCE ordering
+    to hold, since that ordering is a property of should_unlock_next_stage's
+    fixed check sequence, not of which checker is configured."""
+
+    def test_configured_gate_catches_the_compound_claim_on_entailment_grounds(self):
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+            conf=0.9,
+        )
+        g = ResearchGraph(nodes=[paper, claim])
+        gate = gates.WorkflowGate(entailment_checker=cv.atomic_entailment_checker)
+        decision = gate.should_unlock_next_stage(claim, g)
+
+        self.assertFalse(decision.can_proceed)
+        self.assertEqual(decision.reason_code, gates.GateReasonCode.CLAIM_NOT_ENTAILED)
+        checked_names = [c.check_name for c in decision.checks]
+        self.assertIn("claim_entailed", checked_names)
+        self.assertNotIn("confidence_above_threshold", checked_names)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
