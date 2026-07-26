@@ -11,8 +11,16 @@ import unittest
 import golden_fixtures as gf
 import literature_corpus as corpus
 import research_graph_gates as gates
-from research_graph_schema import EdgeType, NodeType
+from research_graph_schema import Edge, EdgeType, Node, NodeType, ResearchGraph
 import graph_queries as q
+
+
+def _job(job_id: str) -> Node:
+    return Node(job_id, NodeType.EXTRACTION_JOB.value, job_id)
+
+
+def _blocked_by_edge(source: str, target: str) -> Edge:
+    return Edge(source, target, EdgeType.BLOCKED_BY.value)
 
 
 class TestGetNodeAndNeighbors(unittest.TestCase):
@@ -155,6 +163,60 @@ class TestStatusSummary(unittest.TestCase):
         summary = q.status_summary(graph)
         self.assertEqual(summary["nodes_by_type"][NodeType.PAPER.value], 20)
         self.assertEqual(summary["nodes_by_type"][NodeType.GAP.value], 5)
+
+
+class TestDetectJobDependencyCycles(unittest.TestCase):
+    def test_acyclic_chain_has_no_cycles(self):
+        graph = ResearchGraph(
+            nodes=[_job("job_a"), _job("job_b"), _job("job_c")],
+            edges=[_blocked_by_edge("job_a", "job_b"), _blocked_by_edge("job_b", "job_c")],
+        )
+        self.assertEqual(q.detect_job_dependency_cycles(graph), [])
+
+    def test_direct_two_cycle_detected(self):
+        graph = ResearchGraph(
+            nodes=[_job("job_a"), _job("job_b")],
+            edges=[_blocked_by_edge("job_a", "job_b"), _blocked_by_edge("job_b", "job_a")],
+        )
+        cycles = q.detect_job_dependency_cycles(graph)
+        self.assertEqual(len(cycles), 1)
+        self.assertIn("job_a", cycles[0])
+        self.assertIn("job_b", cycles[0])
+        self.assertEqual(cycles[0][0], cycles[0][-1])  # closed cycle
+
+    def test_longer_cycle_detected(self):
+        graph = ResearchGraph(
+            nodes=[_job(n) for n in ("job_a", "job_b", "job_c")],
+            edges=[
+                _blocked_by_edge("job_a", "job_b"),
+                _blocked_by_edge("job_b", "job_c"),
+                _blocked_by_edge("job_c", "job_a"),
+            ],
+        )
+        cycles = q.detect_job_dependency_cycles(graph)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(set(cycles[0]), {"job_a", "job_b", "job_c"})
+
+    def test_self_loop_detected(self):
+        graph = ResearchGraph(
+            nodes=[_job("job_a")],
+            edges=[_blocked_by_edge("job_a", "job_a")],
+        )
+        cycles = q.detect_job_dependency_cycles(graph)
+        self.assertEqual(cycles, [["job_a", "job_a"]])
+
+    def test_non_blocked_by_edges_are_ignored(self):
+        graph = ResearchGraph(
+            nodes=[_job("job_a"), _job("job_b")],
+            edges=[Edge("job_a", "job_b", EdgeType.UNLOCKS.value),
+                   Edge("job_b", "job_a", EdgeType.PRODUCES.value)],
+        )
+        self.assertEqual(q.detect_job_dependency_cycles(graph), [])
+
+    def test_golden_fixture_graph_has_no_cycles(self):
+        # Real-world sanity check: the shipped fixture graph must not deadlock.
+        graph = gf.build_fixture_graph()
+        self.assertEqual(q.detect_job_dependency_cycles(graph), [])
 
 
 if __name__ == "__main__":

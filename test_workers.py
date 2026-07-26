@@ -237,7 +237,7 @@ class TestDirectiveIsHonoredByReferenceWorker(unittest.TestCase):
 
     def test_unsupported_extraction_type_fails_cleanly(self):
         sp, _ = spawner()
-        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS)
+        _, d = sp.spawn(PAPER, ExtractionType.METHODS)
         env = ReferenceWorker().run(d, ABSTRACT)
         self.assertEqual(env.worker_status, "failed")
         self.assertFalse(sp.admit(d, env).admitted)
@@ -245,6 +245,55 @@ class TestDirectiveIsHonoredByReferenceWorker(unittest.TestCase):
     def test_every_extraction_type_has_a_target_node_type(self):
         for et in ExtractionType:
             self.assertIn(et, PRODUCES_NODE_TYPE)
+
+
+class TestBenchmarkExtraction(unittest.TestCase):
+    """ReferenceWorker.BENCHMARKS: two deliberately dumb signals -- a
+    '...Bench' suffix (strong) and a '<Name> benchmark' phrase (weaker)."""
+
+    TEXT = ("We evaluate on SWE-Bench and MLR-Bench. "
+            "The PRISM benchmark was also used, alongside LEGOBench.")
+
+    def test_suffix_matches_extracted_at_high_confidence(self):
+        sp, _ = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS)
+        env = ReferenceWorker().run(d, self.TEXT)
+        names = {n.properties["text"] for n in env.nodes}
+        self.assertIn("SWE-Bench", names)
+        self.assertIn("MLR-Bench", names)
+        self.assertIn("LEGOBench", names)
+        suffix_nodes = [n for n in env.nodes if n.properties["text"] in
+                        {"SWE-Bench", "MLR-Bench", "LEGOBench"}]
+        self.assertTrue(all(n.provenance.confidence == 0.8 for n in suffix_nodes))
+
+    def test_phrase_match_extracted_at_lower_confidence(self):
+        sp, _ = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS)
+        env = ReferenceWorker().run(d, self.TEXT)
+        prism = next(n for n in env.nodes if n.properties["text"] == "PRISM")
+        self.assertEqual(prism.provenance.confidence, 0.6)
+
+    def test_admits_cleanly_and_produces_benchmark_nodes(self):
+        sp, _ = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS)
+        env = ReferenceWorker().run(d, self.TEXT)
+        result = sp.admit(d, env)
+        self.assertTrue(result.admitted)
+        self.assertTrue(all(n.type == NodeType.BENCHMARK.value for n in env.nodes))
+
+    def test_confidence_floor_filters_out_the_weaker_phrase_match(self):
+        sp, _ = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS, confidence_floor=0.7)
+        env = ReferenceWorker().run(d, self.TEXT)
+        names = {n.properties["text"] for n in env.nodes}
+        self.assertNotIn("PRISM", names)
+        self.assertIn("SWE-Bench", names)
+
+    def test_no_benchmark_mentions_yields_nothing(self):
+        sp, _ = spawner()
+        _, d = sp.spawn(PAPER, ExtractionType.BENCHMARKS)
+        env = ReferenceWorker().run(d, "This text has no benchmark names in it at all.")
+        self.assertEqual(env.nodes, [])
 
 
 class TestConflictsAndWaiverEndToEnd(unittest.TestCase):

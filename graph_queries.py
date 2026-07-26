@@ -8,7 +8,7 @@ call directly, instead of parsing report text. Every function here takes a
 ResearchGraph (plus an optional WorkflowGate where a live decision is needed)
 and returns nodes/edges/decisions -- never text, never a mutation.
 
-Six questions an agent actually needs to ask:
+Seven questions an agent actually needs to ask:
   get_node              -- "what is this id"
   claims_for_paper       -- "what did this paper produce"
   neighbors              -- "what connects to this node, and how"
@@ -16,6 +16,7 @@ Six questions an agent actually needs to ask:
   contradicting_claims   -- "what contradicts this specific claim"
   blocked_jobs/why_blocked -- "what's stuck, and why" (re-runs the real gate)
   search                 -- "find nodes whose text mentions X"
+  detect_job_dependency_cycles -- "will this job graph deadlock" (BLOCKED_BY cycles)
 """
 
 from typing import Any, Dict, List, Optional
@@ -169,3 +170,41 @@ def status_summary(graph: ResearchGraph) -> Dict[str, Any]:
         "review_status": review_status,
         "unresolved_conflicts": len(unresolved_conflicts(graph)),
     }
+
+
+def detect_job_dependency_cycles(graph: ResearchGraph) -> List[List[str]]:
+    """
+    The "task DAG" from the graph-theory survey must actually be acyclic, or
+    two extraction_job nodes wait on each other forever. Runs standard
+    three-color DFS cycle detection over BLOCKED_BY edges (declared in the
+    schema's EDGE_ENDPOINT_CONTRACT but not otherwise consumed anywhere yet)
+    and returns each cycle found as a list of node ids in cycle order,
+    closed (first id repeated at the end). Empty list means no deadlock.
+    """
+    adjacency: Dict[str, List[str]] = {}
+    for e in graph.edges:
+        if e.type == EdgeType.BLOCKED_BY.value:
+            adjacency.setdefault(e.source, []).append(e.target)
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: Dict[str, int] = {}
+    cycles: List[List[str]] = []
+
+    def visit(node: str, path: List[str]) -> None:
+        color[node] = GRAY
+        path.append(node)
+        for neighbor in adjacency.get(node, []):
+            state = color.get(neighbor, WHITE)
+            if state == WHITE:
+                visit(neighbor, path)
+            elif state == GRAY:
+                cycle_start = path.index(neighbor)
+                cycles.append(path[cycle_start:] + [neighbor])
+        path.pop()
+        color[node] = BLACK
+
+    for node_id in list(adjacency):
+        if color.get(node_id, WHITE) == WHITE:
+            visit(node_id, [])
+
+    return cycles

@@ -19,6 +19,17 @@ moves to the next item after `make validate` is green and a human has merged.
   query box (`webapp.py`)
 - Real arXiv ingestion, idempotent (`arxiv_ingest.py`)
 - Literature survey corpus, 20 papers / 5 gaps (`literature_corpus.py`)
+- CLAUDE.md / this file / Makefile / `run_report.py` — the process governance
+  layer itself
+- Orchestrator: fan-out over one paper to claim/concept/benchmark extractors,
+  collected into one `OrchestrationReport`, still gated by the unchanged
+  `WorkerSpawner`/`WorkflowGate` path (`graph_orchestrator.py`); benchmark
+  extraction added to `ReferenceWorker` to make the fan-out real, not stubbed;
+  `detect_job_dependency_cycles()` added to `graph_queries.py` (cycle
+  detection over `BLOCKED_BY` edges, previously declared in the schema but
+  unconsumed) — inserted ahead of the queued item below per explicit
+  follow-up direction from a second research round on multi-agent graph
+  architecture.
 
 ## Next
 

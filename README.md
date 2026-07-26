@@ -22,10 +22,11 @@ pass, and if a human waived one of those checks — who, and on what grounds.
 |---|---|---|
 | Schema | `research_graph_schema.py` | Closed node/edge types, structured traces, validation with reason codes — not a bare bool |
 | Gate | `research_graph_gates.py` | `WorkflowGate.should_unlock_next_stage()` — six deterministic checks, every verdict traced |
-| Workers | `research_graph_workers.py` | `ExtractionDirective` in, `ResultEnvelope` out; `WorkerSpawner` is the only writer to the graph, and treats every worker as untrusted |
+| Workers | `research_graph_workers.py` | `ExtractionDirective` in, `ResultEnvelope` out; `WorkerSpawner` is the only writer to the graph, and treats every worker as untrusted. `ReferenceWorker` extracts claims, concepts, and benchmarks (deliberately dumb heuristics — proving the loop closes, not extraction quality) |
+| Orchestrator | `graph_orchestrator.py` | Fan-out over one paper to the claim/concept/benchmark extractors, collected into one `OrchestrationReport` — schema validation, conflict detection, and the gate decision all still happen inside the *unchanged* `WorkerSpawner.admit()`, not duplicated here |
 | Conflict detection | `research_graph_schema.detect_conflicts_in_graph()` | Deterministic heuristics first — same subject/object, opposed relation |
 | Inspection | `graph_inspector.py` | Plain-text report: papers, claims, conflicts, jobs, held/review-required, and *why* a gate blocked each one (re-runs the live gate, not a cached string) |
-| Query layer | `graph_queries.py` | `get_node`, `neighbors`, `claims_for_paper`, `contradicting_claims`, `why_blocked`, `search` — structured answers, not text to parse |
+| Query layer | `graph_queries.py` | `get_node`, `neighbors`, `claims_for_paper`, `contradicting_claims`, `why_blocked`, `search`, `detect_job_dependency_cycles` — structured answers, not text to parse |
 | Roadmap | `graph_roadmap.py` | Rolls GAP/METHOD/DOMAIN/BENCHMARK nodes up by how many papers substantiate each one |
 | Evaluation | `graph_evals.py` | Quality, not just correctness: query-answer evals, gate-decision audits, extraction precision/recall, and a regression set that must never silently start passing again |
 | Web UI | `webapp.py` | FastAPI: graph overview, blocked jobs, unresolved conflicts, paper → claims drilldown, review queue, and a small query box over the graph |
@@ -54,6 +55,9 @@ make roadmap             # == python3 graph_roadmap.py
 
 # check quality, not just correctness
 make evals               # == python3 graph_evals.py
+
+# fan a paper out to claim/concept/benchmark extraction, gated as normal
+python3 graph_orchestrator.py
 
 # tests + evals together -- the one thing a run must pass before it's done
 make validate

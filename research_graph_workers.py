@@ -424,6 +424,13 @@ _STOP = {"the", "a", "an", "of", "and", "or", "for", "to", "in", "on", "at", "we
 _RELATIONS = ["reduces", "increases", "improves", "degrades", "enables",
               "prevents", "outperforms", "underperforms", "decreases"]
 
+# Two deliberately dumb signals, same spirit as the concept/claim heuristics
+# above: a name ending in "Bench"/"bench" (SWE-Bench, MLR-Bench, LEGOBench) is
+# a strong signal; a capitalized phrase immediately before the word
+# "benchmark" (the "PRISM benchmark") is a weaker one.
+_BENCHMARK_SUFFIX_RE = re.compile(r"\b[A-Z][\w\-]*(?:Bench|bench)\b")
+_BENCHMARK_PHRASE_RE = re.compile(r"\b([A-Z][\w\-]{2,})\s+benchmark\b")
+
 
 class ReferenceWorker:
     """
@@ -444,6 +451,8 @@ class ReferenceWorker:
             return self._concepts(directive, text)
         if directive.extraction_type == ExtractionType.CLAIMS:
             return self._claims(directive, text)
+        if directive.extraction_type == ExtractionType.BENCHMARKS:
+            return self._benchmarks(directive, text)
         return ResultEnvelope(directive.job_id, self.worker_id, worker_status="failed",
                               error=f"unsupported extraction_type "
                                     f"{directive.extraction_type.value}")
@@ -514,5 +523,40 @@ class ReferenceWorker:
             traces.append(Trace(self._trace_id(), DecisionType.EXTRACT, self.worker_id,
                                 conf, "RELATION_TRIPLE",
                                 f"parsed '{subj}' -{rel}-> '{obj}'",
+                                input_refs=[f"{d.paper_id}#text"], output_refs=[nid]))
+        return ResultEnvelope(d.job_id, self.worker_id, nodes, traces)
+
+    def _benchmarks(self, d: ExtractionDirective, text: str) -> ResultEnvelope:
+        nodes: List[Node] = []
+        traces: List[Trace] = []
+        # name -> confidence, first-seen order preserved; a suffix match (SWE-Bench)
+        # is a stronger signal than a bare "<Name> benchmark" phrase, so it wins
+        # if a name is caught by both patterns.
+        candidates: Dict[str, float] = {}
+        for m in _BENCHMARK_SUFFIX_RE.finditer(text):
+            candidates.setdefault(m.group(0), 0.8)
+        for m in _BENCHMARK_PHRASE_RE.finditer(text):
+            candidates.setdefault(m.group(1), 0.6)
+
+        for name, conf in candidates.items():
+            if conf < d.confidence_floor:
+                traces.append(Trace(self._trace_id(), DecisionType.SKIP, self.worker_id,
+                                    conf, "BELOW_DIRECTIVE_FLOOR",
+                                    f"'{name}' scored {conf:.2f}, under floor {d.confidence_floor:.2f}",
+                                    input_refs=[f"{d.paper_id}#text"]))
+                continue
+            if d.max_results is not None and len(nodes) >= d.max_results:
+                traces.append(Trace(self._trace_id(), DecisionType.ABSTAIN, self.worker_id,
+                                    conf, "MAX_RESULTS_REACHED",
+                                    f"'{name}' qualified but directive caps at {d.max_results}",
+                                    input_refs=[f"{d.paper_id}#text"]))
+                continue
+            nid = f"benchmark_{_slug(d.paper_id + name)}"
+            nodes.append(Node(nid, NodeType.BENCHMARK.value, name,
+                              self._prov(d, conf, ExtractionMethod.KEYWORD),
+                              {"text": name}))
+            traces.append(Trace(self._trace_id(), DecisionType.EXTRACT, self.worker_id,
+                                conf, "BENCHMARK_NAME_PATTERN",
+                                f"'{name}' matched a benchmark-name pattern",
                                 input_refs=[f"{d.paper_id}#text"], output_refs=[nid]))
         return ResultEnvelope(d.job_id, self.worker_id, nodes, traces)
