@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Literature corpus — 10 studies (Apr-Jul 2026) surveyed to decide what this repo
-should build next, entered as real graph data instead of a memo.
+Literature corpus — 20 studies (Apr-Jul 2026, two survey rounds) surveyed to
+decide what this repo should build next, entered as real graph data instead
+of a memo.
 
 Each paper PRODUCES one CLAIM capturing why it's relevant to this engine, and
-that claim ADDRESSES one of the four capability GAPs the survey turned up:
+that claim ADDRESSES one of the five capability GAPs the survey turned up:
 
   gap_typed_provenance_edges  — provenance is a flat record; no typed relations
                                  (derivation/contradiction/support) between nodes.
@@ -14,6 +15,11 @@ that claim ADDRESSES one of the four capability GAPs the survey turned up:
                                  or multi-dimensional reviewer reconciliation.
   gap_roadmap_queries         — no read-side query that rolls GAP/METHOD nodes
                                  up into a contribution/roadmap view.
+                                 (closed by graph_roadmap.py -- kept here so the
+                                 corpus still explains its own history.)
+  gap_adaptive_recovery       — WorkerSpawner.admit() fails a rejected envelope
+                                 wholesale; there's no diagnose-and-retarget
+                                 recovery loop the way an adaptive pipeline has.
 
 Dogfoods the schema: every node here is built the same way research_graph_workers.py
 would build one from a real extraction job, and the whole graph is expected to pass
@@ -56,6 +62,9 @@ GAPS = [
     ("gap_roadmap_queries",
      "There is no read-side query that aggregates GAP/METHOD/DOMAIN nodes into "
      "a rolled-up scientific-contribution or roadmap view."),
+    ("gap_adaptive_recovery",
+     "WorkerSpawner.admit() fails a rejected envelope wholesale; there is no "
+     "diagnose-the-failure-and-retarget-extraction recovery loop."),
 ]
 
 
@@ -197,6 +206,130 @@ PAPERS = [
         relation="suggests",
         object="a new GateReasonCode.ADVERSARIAL_UNVERIFIED check",
         gap="gap_claim_source_verify",
+    ),
+
+    # -- Round 2 (Jul 2026 follow-up survey) --------------------------------
+    dict(
+        id="paper_2606_22342",
+        title="How Does Research Evolve? Tracing Cross-Domain Trajectories in NLP, ML, and CV with Claim-Grounded Typed Citations",
+        url="https://arxiv.org/pdf/2606.22342",
+        published="2026-06",
+        claim="Typed citation edges, gated by claim-entailment verification per relation "
+              "type, trace research evolution more precisely than a single CITES/BUILDS_ON edge.",
+        subject="claim-grounded typed citations",
+        relation="reinforces",
+        object="the case for new EdgeType values beyond CITES/BUILDS_ON",
+        gap="gap_typed_provenance_edges",
+    ),
+    dict(
+        id="paper_2604_06170",
+        title="Paper Circle: An Open-source Multi-agent Research Discovery and Analysis Framework",
+        url="https://arxiv.org/pdf/2604.06170",
+        published="2026-04",
+        claim="A dedicated Verification Layer that checks extracted graph facts against "
+              "source text, separate from the Ingestion/Graph-Builder layers, is what "
+              "gives full traceability.",
+        subject="a dedicated verification layer",
+        relation="parallels",
+        object="the missing claim-to-source verification step in the gate",
+        gap="gap_claim_source_verify",
+    ),
+    dict(
+        id="paper_2606_15246",
+        title="Provenance-Enhanced Statements in Knowledge Graphs",
+        url="https://arxiv.org/html/2606.15246",
+        published="2026-06",
+        claim="Documented provenance is not enough on its own; automated verification "
+              "that the documented source actually supports the asserted fact is required.",
+        subject="automated provenance verification",
+        relation="reinforces",
+        object="the gap between source_paper existing and a claim being entailed by it",
+        gap="gap_claim_source_verify",
+    ),
+    dict(
+        id="paper_2606_11127",
+        title="Provenance-Grounded Gating and Adaptive Recovery in Synthetic Post-Training Data Curation",
+        url="https://arxiv.org/abs/2606.11127",
+        published="2026-06",
+        claim="An adaptive recovery pipeline -- diagnose why an item was rejected, then "
+              "regenerate a targeted fix -- recovers far more usable data than a flat "
+              "accept/reject gate.",
+        subject="diagnose-and-regenerate adaptive recovery",
+        relation="suggests",
+        object="a recovery loop for WorkerSpawner.admit() rejections",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_2605_27204",
+        title="GraphReview: Scientific Paper Evaluation via LLM-Based Graph Message Passing",
+        url="https://arxiv.org/pdf/2605.27204",
+        published="2026-05",
+        claim="Modeling reviewer reasoning as message passing over a graph of evidence "
+              "produces a richer verdict than a single pass/fail review decision.",
+        subject="graph message-passing review",
+        relation="extends",
+        object="the single-pass ReviewStatus decision on a review_task",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_2605_05476",
+        title="A Unified Benchmark for Evaluating Knowledge Graph Construction Methods and Graph Neural Networks",
+        url="https://arxiv.org/html/2605.05476v1",
+        published="2026-05",
+        claim="Benchmarking knowledge graph construction methods on whether they preserve "
+              "typed relations, not just node/edge counts, is what actually differentiates them.",
+        subject="typed-relation-aware KG construction benchmarking",
+        relation="supports",
+        object="typed EdgeType values as a measurable, not cosmetic, improvement",
+        gap="gap_typed_provenance_edges",
+    ),
+    dict(
+        id="paper_langchain_deep_agents_benchmark",
+        title="How We Benchmark Deep Agents",
+        url="https://www.langchain.com/blog/how-we-benchmark-deep-agents",
+        published="2026-07",
+        claim="Agent evaluation has shifted from small unit-style tests to end-to-end "
+              "evals, because long-horizon agent tasks fail in ways unit tests don't catch.",
+        subject="end-to-end agent evals",
+        relation="argues_for",
+        object="evaluating the whole extraction-to-review loop, not each gate check in isolation",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_2605_26079",
+        title="Toward More Reliable Agent Evaluation: A Component-Based Benchmark Auditing Pipeline",
+        url="https://arxiv.org/pdf/2605.26079",
+        published="2026-05",
+        claim="Auditing a benchmark's components (not just running agents against it) "
+              "surfaces evaluation flaws that outcome-only scoring hides.",
+        subject="component-based benchmark auditing",
+        relation="strengthens",
+        object="the case for reviewer/gate behavioral audits, not just pass-rate metrics",
+        gap="gap_multidim_review",
+    ),
+    dict(
+        id="paper_openreview_piml_automl2026",
+        title="PiML: Automated Machine Learning Workflow Optimization using LLM Agents",
+        url="https://openreview.net/forum?id=Nw1qBpsjZz",
+        published="2026 (AutoML 2026 Methods Track)",
+        claim="Iterative reasoning with systematic debugging on failure -- not a single "
+              "generate-and-check pass -- is what let this agent beat a non-iterative baseline.",
+        subject="iterative reasoning with systematic debugging",
+        relation="suggests",
+        object="a retry-with-diagnosis loop instead of WorkerSpawner's single admit-or-reject pass",
+        gap="gap_adaptive_recovery",
+    ),
+    dict(
+        id="paper_2604_24955",
+        title="BenchGuard: Who Guards the Benchmarks? Automated Auditing of LLM Agent Benchmarks",
+        url="https://arxiv.org/html/2604.24955v1",
+        published="2026-04",
+        claim="Benchmarks themselves need automated auditing for issues, since a flawed "
+              "benchmark silently invalidates every agent evaluation run against it.",
+        subject="automated benchmark integrity auditing",
+        relation="reinforces",
+        object="the need for behavioral, not just outcome, review auditing",
+        gap="gap_multidim_review",
     ),
 ]
 

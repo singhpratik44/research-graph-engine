@@ -153,8 +153,8 @@ class TestStatusSummary(unittest.TestCase):
     def test_counts_match_corpus_graph(self):
         graph = corpus.build_corpus_graph()
         summary = q.status_summary(graph)
-        self.assertEqual(summary["nodes_by_type"][NodeType.PAPER.value], 10)
-        self.assertEqual(summary["nodes_by_type"][NodeType.GAP.value], 4)
+        self.assertEqual(summary["nodes_by_type"][NodeType.PAPER.value], 20)
+        self.assertEqual(summary["nodes_by_type"][NodeType.GAP.value], 5)
 
 
 if __name__ == "__main__":

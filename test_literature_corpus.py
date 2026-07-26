@@ -19,17 +19,17 @@ class TestLiteratureCorpusGraph(unittest.TestCase):
         result = self.graph.validate()
         self.assertTrue(result.valid, msg=[e.message for e in result.errors])
 
-    def test_ten_papers_present(self):
+    def test_twenty_papers_present(self):
         papers = [n for n in self.graph.nodes if n.type == NodeType.PAPER.value]
-        self.assertEqual(len(papers), 10)
+        self.assertEqual(len(papers), 20)
 
-    def test_four_gaps_present(self):
+    def test_five_gaps_present(self):
         gaps = [n for n in self.graph.nodes if n.type == NodeType.GAP.value]
-        self.assertEqual(len(gaps), 4)
+        self.assertEqual(len(gaps), 5)
 
     def test_every_paper_produces_exactly_one_claim(self):
         produces = [e for e in self.graph.edges if e.type == EdgeType.PRODUCES.value]
-        self.assertEqual(len(produces), 10)
+        self.assertEqual(len(produces), 20)
         sources = [e.source for e in produces]
         self.assertEqual(len(sources), len(set(sources)))
 
@@ -37,7 +37,7 @@ class TestLiteratureCorpusGraph(unittest.TestCase):
         idx = self.graph.index()
         gap_ids = {n.id for n in self.graph.nodes if n.type == NodeType.GAP.value}
         addresses = [e for e in self.graph.edges if e.type == EdgeType.ADDRESSES.value]
-        self.assertEqual(len(addresses), 10)
+        self.assertEqual(len(addresses), 20)
         for e in addresses:
             self.assertIn(e.source, idx)
             self.assertIn(e.target, gap_ids)

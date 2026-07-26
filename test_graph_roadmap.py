@@ -2,7 +2,7 @@
 """
 Test suite for graph_roadmap.py: the rollup answering gap_roadmap_queries from
 literature_corpus.py itself -- proving the survey's own most-cited gap
-(multi-dimensional review, 5 papers) surfaces correctly.
+(multi-dimensional review, 9 papers across two survey rounds) surfaces correctly.
 """
 
 import unittest
@@ -17,9 +17,9 @@ class TestRoadmapSummary(unittest.TestCase):
     def setUp(self):
         self.graph = corpus.build_corpus_graph()
 
-    def test_four_gap_rows_returned(self):
+    def test_five_gap_rows_returned(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len(rows), 5)
 
     def test_sorted_by_paper_count_descending(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
@@ -30,7 +30,7 @@ class TestRoadmapSummary(unittest.TestCase):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
         top = rows[0]
         self.assertEqual(top["id"], "gap_multidim_review")
-        self.assertEqual(top["paper_count"], 5)
+        self.assertEqual(top["paper_count"], 9)
 
     def test_roadmap_queries_gap_has_exactly_its_own_paper(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
@@ -40,11 +40,17 @@ class TestRoadmapSummary(unittest.TestCase):
                                            "The Scientific Contribution Graph: "
                                            "Automated Literature-based Technological Roadmapping at Scale")])
 
+    def test_newest_gap_has_two_papers(self):
+        rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
+        row = next(r for r in rows if r["id"] == "gap_adaptive_recovery")
+        self.assertEqual(row["paper_count"], 2)
+
     def test_attribution_walks_claim_back_to_producing_paper(self):
         rows = roadmap.roadmap_summary(self.graph, NodeType.GAP)
         row = next(r for r in rows if r["id"] == "gap_claim_source_verify")
         paper_ids = {pid for pid, _ in row["papers"]}
-        self.assertEqual(paper_ids, {"paper_2607_04043", "paper_2605_03042"})
+        self.assertEqual(paper_ids, {"paper_2607_04043", "paper_2605_03042",
+                                      "paper_2604_06170", "paper_2606_15246"})
 
     def test_unknown_node_type_rejected(self):
         with self.assertRaises(ValueError):
@@ -64,7 +70,7 @@ class TestFullRoadmap(unittest.TestCase):
 class TestRenderRoadmapReport(unittest.TestCase):
     def test_report_mentions_top_gap_and_its_count(self):
         report = roadmap.render_roadmap_report(corpus.build_corpus_graph())
-        self.assertIn("[5] gap_multidim_review", report)
+        self.assertIn("[9] gap_multidim_review", report)
 
     def test_report_on_empty_graph_says_so(self):
         report = roadmap.render_roadmap_report(gf.build_fixture_graph())
