@@ -43,6 +43,19 @@ moves to the next item after `make validate` is green and a human has merged.
   skipped alongside tests/evals. `graph_algorithms.py` factored out so the
   cycle-detection algorithm isn't duplicated between this and
   `graph_queries.detect_job_dependency_cycles`.
+- QIH stress-test corpus (`qih_stress_corpus.py`, ad hoc, not part of the
+  sequenced roadmap). Models a real adversarial case -- a document mixing
+  well-established physics with self-published, unsupported speculation at
+  identical citation confidence -- as 7 papers / 10 claims / 2 genuine
+  conflicts, with confidence set from this session's independent fact-check
+  rather than the source document's own self-rating. Confirms the gate
+  separates claims by *reason code*: solid uncontested claims hit
+  `DOWNSTREAM_NOT_ALLOWED` (passed everything, just terminal), genuinely
+  under-supported claims hit `LOW_CONFIDENCE`, and both sides of an active
+  dispute correctly hit `CONFLICT_UNRESOLVED` until a human resolves it.
+  Deliberately kept out of `webapp.py`'s default demo graph (a portfolio UI
+  shouldn't silently surface adversarial content about a real named
+  individual without context).
 
 ## Next
 
