@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+Phase 13: Task DAG + scheduler + structured trace spans
+
+The first production-grade step from this turn's survey: represent work as
+explicit nodes and edges, then instrument every handoff with a structured
+span, rather than starting from "many chatting agents." This module is
+domain-agnostic on purpose -- it doesn't know about papers, claims, or
+extraction jobs. graph_orchestrator.py's paper fan-out could be re-expressed
+as a TaskDAG later; this module doesn't require that yet.
+
+Four pieces:
+  TaskNode / TaskEdge -- the work DAG (typed, closed-enum status)
+  TaskSpan            -- one task's execution record: task_id, agent_id,
+                         parent_task_id, status, confidence, started_at,
+                         ended_at -- the observability unit the survey calls for
+  Scheduler            -- runs all dependency-free ("ready") tasks in each
+                         round concurrently via a real thread pool, waiting
+                         at a merge barrier before computing the next round
+
+Why real threads here (unlike graph_orchestrator.Orchestrator, which stays
+sequential): TaskDAG/Scheduler are a fresh, purpose-built structure with a
+lock around every shared mutation (task status transitions, the spans list),
+so concurrent execution is actually safe here -- not just logically
+independent, as it is for the paper fan-out over the single-writer
+ResearchGraph. The executor function each task runs is caller-supplied and
+receives only the task_id; if that function itself touches a non-thread-safe
+resource, thread-safety of that resource is the caller's problem, not this
+scheduler's.
+"""
+
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Set
+
+import graph_algorithms
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"      # never ran because a dependency failed
+
+
+class TaskEdgeType(str, Enum):
+    DEPENDS_ON = "depends_on"
+
+
+@dataclass
+class TaskNode:
+    task_id: str
+    label: str
+    agent_id: str = ""
+    parent_task_id: Optional[str] = None
+    status: str = TaskStatus.PENDING.value
+
+
+@dataclass
+class TaskEdge:
+    source: str    # this task...
+    target: str    # ...depends on this one
+    type: str = TaskEdgeType.DEPENDS_ON.value
+
+
+@dataclass
+class TaskSpan:
+    """
+    One task's execution record -- the per-task trace span the survey asks for.
+
+    `attempts`/`retry_errors` exist for the bounded retry loop (`gap_adaptive_recovery`):
+    a task still gets exactly ONE span (task_conformance.py's "every task has exactly
+    one span" check is unchanged), but that span now records how many tries it took.
+    `attempts` defaults to 1 and `retry_errors` to `[]` -- a task that never retried
+    (including every run made with `Scheduler`'s default `max_retries=0`) produces a
+    span identical in shape and value to today's.
+
+    `failure_class` (failure-class recovery dispatch): the label a `Scheduler`'s
+    optional `failure_classifier` assigned to this task's failure, if configured.
+    Defaults to `None` -- a task run without a classifier configured produces a
+    span identical in shape and value to today's.
+    """
+    task_id: str
+    agent_id: str
+    parent_task_id: Optional[str]
+    status: str
+    confidence: Optional[float]
+    started_at: str
+    ended_at: Optional[str] = None
+    error: str = ""
+    attempts: int = 1
+    retry_errors: List[str] = field(default_factory=list)
+    failure_class: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+
+@dataclass
+class RunResult:
+    spans: List[TaskSpan] = field(default_factory=list)
+    completed: Set[str] = field(default_factory=set)
+    failed: Set[str] = field(default_factory=set)
+    skipped: Set[str] = field(default_factory=set)
+
+    @property
+    def all_succeeded(self) -> bool:
+        return not self.failed and not self.skipped
+
+
+class TaskDAG:
+    """The work graph: TaskNodes plus DEPENDS_ON TaskEdges. No execution logic here."""
+
+    def __init__(self):
+        self.nodes: Dict[str, TaskNode] = {}
+        self.edges: List[TaskEdge] = []
+
+    def add_task(self, task_id: str, label: str, agent_id: str = "",
+                 parent_task_id: Optional[str] = None) -> TaskNode:
+        if task_id in self.nodes:
+            raise ValueError(f"duplicate task_id {task_id!r}")
+        node = TaskNode(task_id=task_id, label=label, agent_id=agent_id,
+                        parent_task_id=parent_task_id)
+        self.nodes[task_id] = node
+        return node
+
+    def add_dependency(self, task_id: str, depends_on: str) -> None:
+        for tid in (task_id, depends_on):
+            if tid not in self.nodes:
+                raise KeyError(f"unknown task_id {tid!r} -- add_task() first")
+        self.edges.append(TaskEdge(source=task_id, target=depends_on))
+
+    def dependencies_of(self, task_id: str) -> List[str]:
+        return [e.target for e in self.edges if e.source == task_id]
+
+    def detect_cycles(self) -> List[List[str]]:
+        adjacency: Dict[str, List[str]] = {}
+        for e in self.edges:
+            adjacency.setdefault(e.source, []).append(e.target)
+        return graph_algorithms.detect_cycles(adjacency)
+
+    def ready_tasks(self, completed: Set[str], remaining: Set[str]) -> List[str]:
+        """Tasks in `remaining` whose every dependency is already in `completed`."""
+        return [t for t in remaining if all(d in completed for d in self.dependencies_of(t))]
+
+    def failed_ancestors(self, task_id: str, failed: Set[str]) -> List[str]:
+        """
+        Transitive closure of `task_id`'s dependencies, intersected with `failed`
+        -- fault localization for the SKIPPED cascade: which upstream task(s)
+        actually failed and made this one unreachable, not just "a dependency
+        failed" (a dependency either failed or it didn't here, so the exact
+        DEPENDS_ON edges already in the DAG are sufficient -- no separate
+        confidence-graded edge layer is needed to answer this).
+        """
+        seen: Set[str] = set()
+        stack = list(self.dependencies_of(task_id))
+        culprits: Set[str] = set()
+        while stack:
+            dep = stack.pop()
+            if dep in seen:
+                continue
+            seen.add(dep)
+            if dep in failed:
+                culprits.add(dep)
+            else:
+                stack.extend(self.dependencies_of(dep))
+        return sorted(culprits)
+
+
+class Scheduler:
+    """
+    Runs a TaskDAG to completion, one merge-barrier round at a time.
+
+    `max_retries` (default 0, `gap_adaptive_recovery`): when `executor(task_id)`
+    raises, retry the same task up to `max_retries` more times before marking it
+    FAILED and cascading SKIPPED to its dependents. The default of 0 reproduces
+    today's behavior exactly -- one attempt, immediate FAILED on any exception,
+    no dependent of a failed task ever runs.
+
+    `failure_classifier`/`retry_policy` (failure-class recovery dispatch, both
+    default `None`): when a task's executor raises, `failure_classifier(exc)` may
+    label the failure (e.g. "transient" vs. "structural"); if the label is a key
+    in `retry_policy`, that label's retry count overrides `max_retries` for this
+    failure only, so different failure classes can get different recovery
+    budgets instead of one flat retry count for every exception. With either
+    left `None` (the default), or a raised label not present in `retry_policy`,
+    the retry bound is exactly `max_retries` as today -- one classification
+    knob, off by default, never a second competing retry mechanism. A
+    classifier that itself raises is treated as returning no label, so a buggy
+    classifier can never break scheduling.
+    """
+
+    def __init__(self, dag: TaskDAG, max_workers: int = 4, max_retries: int = 0,
+                 failure_classifier: Optional[Callable[[Exception], str]] = None,
+                 retry_policy: Optional[Dict[str, int]] = None):
+        self.dag = dag
+        self.max_workers = max_workers
+        self.max_retries = max_retries
+        self.failure_classifier = failure_classifier
+        self.retry_policy = retry_policy
+
+    def run(self, executor: Callable[[str], Optional[Dict]]) -> RunResult:
+        """
+        `executor(task_id)` runs one task and may return {"confidence": float}
+        (or nothing). Raising retries the task (bounded by `self.max_retries`);
+        once retries are exhausted the task is marked FAILED and everything that
+        transitively depends on it is skipped -- it is never silently ignored.
+        """
+        cycles = self.dag.detect_cycles()
+        if cycles:
+            raise ValueError(f"task DAG has a dependency cycle: {cycles[0]}")
+
+        result = RunResult()
+        lock = threading.Lock()
+
+        def run_one(task_id: str) -> None:
+            node = self.dag.nodes[task_id]
+            started = _now()
+            with lock:
+                node.status = TaskStatus.RUNNING.value
+
+            attempts = 0
+            retry_errors: List[str] = []
+            failure_class: Optional[str] = None
+            while True:
+                attempts += 1
+                try:
+                    outcome = executor(task_id) or {}
+                    confidence = outcome.get("confidence")
+                    status, error = TaskStatus.COMPLETED.value, ""
+                    break
+                except Exception as exc:
+                    confidence, status, error = None, TaskStatus.FAILED.value, repr(exc)
+                    limit = self.max_retries
+                    if self.failure_classifier is not None:
+                        try:
+                            failure_class = self.failure_classifier(exc)
+                        except Exception:
+                            failure_class = None
+                        if (failure_class is not None and self.retry_policy is not None
+                                and failure_class in self.retry_policy):
+                            limit = self.retry_policy[failure_class]
+                    if attempts - 1 < limit:
+                        retry_errors.append(error)
+                        continue
+                    break
+
+            span = TaskSpan(task_id=task_id, agent_id=node.agent_id,
+                            parent_task_id=node.parent_task_id, status=status,
+                            confidence=confidence, started_at=started, ended_at=_now(),
+                            error=error, attempts=attempts, retry_errors=retry_errors,
+                            failure_class=failure_class)
+            with lock:
+                node.status = status
+                result.spans.append(span)
+                (result.completed if status == TaskStatus.COMPLETED.value else result.failed).add(task_id)
+
+        remaining: Set[str] = set(self.dag.nodes)
+        while remaining:
+            ready = self.dag.ready_tasks(result.completed, remaining)
+            if not ready:
+                # Cycles are already ruled out, so every remaining task must be
+                # unreachable because something it (transitively) depends on failed.
+                for task_id in remaining:
+                    node = self.dag.nodes[task_id]
+                    node.status = TaskStatus.SKIPPED.value
+                    culprits = self.dag.failed_ancestors(task_id, result.failed)
+                    error = (f"unreachable: depends (transitively) on failed "
+                             f"task(s): {', '.join(culprits)}" if culprits
+                             else "unreachable: a dependency failed")
+                    result.spans.append(TaskSpan(
+                        task_id=task_id, agent_id=node.agent_id, parent_task_id=node.parent_task_id,
+                        status=TaskStatus.SKIPPED.value, confidence=None,
+                        started_at=_now(), ended_at=_now(),
+                        error=error,
+                    ))
+                    result.skipped.add(task_id)
+                break
+
+            with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+                list(pool.map(run_one, ready))
+
+            remaining -= set(ready)
+
+        return result
+
+
+if __name__ == "__main__":
+    import time
+
+    dag = TaskDAG()
+    dag.add_task("extract_claims", "Extract claims", agent_id="claim_extractor")
+    dag.add_task("extract_concepts", "Extract concepts", agent_id="concept_extractor")
+    dag.add_task("merge", "Merge results", agent_id="collector")
+    dag.add_dependency("merge", depends_on="extract_claims")
+    dag.add_dependency("merge", depends_on="extract_concepts")
+
+    def demo_executor(task_id: str) -> Dict:
+        time.sleep(0.05)
+        return {"confidence": 0.9}
+
+    result = Scheduler(dag).run(demo_executor)
+    for span in result.spans:
+        print(f"{span.task_id}: {span.status} (agent={span.agent_id}, "
+              f"confidence={span.confidence})")
+    print(f"\nall_succeeded={result.all_succeeded}")

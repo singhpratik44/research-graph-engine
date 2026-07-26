@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+run_report.json
+
+# Isolated worktrees for background agents (transient tool state, not repo content)
+.claude/
