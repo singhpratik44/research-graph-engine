@@ -17,27 +17,9 @@ This module never mutates a graph; it only reports on one.
 
 from typing import List, Optional
 
-from research_graph_schema import Node, ResearchGraph, NodeType, JobStatus, ReviewStatus
+from research_graph_schema import ResearchGraph, NodeType, JobStatus, ReviewStatus
 import research_graph_gates as gates
-
-
-def _to_gate_node(n: Node) -> gates.Node:
-    """schema Node -> gate Node adapter. Same field names; the gate is trace-agnostic."""
-    p = n.provenance
-    return gates.Node(
-        id=n.id,
-        type=n.type,
-        label=n.label,
-        provenance=None if p is None else gates.Provenance(
-            source_paper=p.source_paper,
-            extraction_method=p.extraction_method,
-            confidence=p.confidence,
-            extracted_at=p.extracted_at,
-            human_reviewed=p.human_reviewed,
-            review_notes=p.review_notes,
-        ),
-        properties=n.properties,
-    )
+from graph_queries import _to_gate_node, blocked_jobs  # re-exported for callers/tests
 
 
 def _section(title: str, rows: List[str]) -> List[str]:
@@ -108,15 +90,13 @@ def render_report(graph: ResearchGraph, gate: Optional[gates.WorkflowGate] = Non
         for r in pending_reviews
     ])
 
-    blocked: List[str] = []
-    for j in jobs:
-        decision = gate.should_unlock_next_stage(_to_gate_node(j), graph)
-        if not decision.can_proceed:
-            failed = next((c for c in decision.checks if not c.passed), None)
-            failed_note = f"  (failed check: {failed.check_name})" if failed else ""
-            blocked.append(f"{j.id}: [{decision.reason_code.value}] {decision.reason}{failed_note}")
+    blocked_lines: List[str] = []
+    for decision in blocked_jobs(graph, gate):
+        failed = next((c for c in decision.checks if not c.passed), None)
+        failed_note = f"  (failed check: {failed.check_name})" if failed else ""
+        blocked_lines.append(f"{decision.node_id}: [{decision.reason_code.value}] {decision.reason}{failed_note}")
     lines.append("")
-    lines += _section("WHY A GATE BLOCKED PROGRESSION", blocked)
+    lines += _section("WHY A GATE BLOCKED PROGRESSION", blocked_lines)
 
     return "\n".join(lines)
 
