@@ -24,6 +24,7 @@ pass, and if a human waived one of those checks — who, and on what grounds.
 | Gate | `research_graph_gates.py` | `WorkflowGate.should_unlock_next_stage()` — seven deterministic checks (schema, provenance, claim entailment, confidence, human review, conflicts, downstream eligibility), every verdict traced |
 | Claim verification | `claim_verification.py` | `keyword_overlap_entailment_checker()` — pluggable into the gate's `_check_claim_entailed`; a claim citing a real source that doesn't actually support it now fails on `CLAIM_NOT_ENTAILED`, not just on hand-assigned low confidence. `atomic_entailment_checker()` decomposes a compound claim into clauses and requires the *weakest* one to clear the bar, so a single unsupported clause can't hide behind a well-supported one (`atomic_entailment_report()` exposes per-atom detail as a separate diagnostic) |
 | Workers | `research_graph_workers.py` | `ExtractionDirective` in, `ResultEnvelope` out; `WorkerSpawner` is the only writer to the graph, and treats every worker as untrusted. `ReferenceWorker` extracts claims, concepts, and benchmarks (deliberately dumb heuristics — proving the loop closes, not extraction quality). `admit()` supports a bounded, audited retry (`retry_with`/`max_retries`, default off) instead of failing a rejected envelope wholesale. `classify_rejection()` classifies a rejection into one of five broad failure classes, for a caller's own retry strategy to consult |
+| LLM worker | `llm_worker.py` | `LLMWorker` — a drop-in for `ReferenceWorker` backed by a real Claude API call instead of regex heuristics, satisfying the exact same envelope contract (`WorkerSpawner.admit()` doesn't know or care which produced it). `call_model` is injected (same pattern as `arxiv_ingest.py`'s `http_get`), so parsing/envelope logic is fully tested without a network call; the real call path needs `ANTHROPIC_API_KEY`, which this sandbox has never had, so it's written but not exercised end-to-end here — said plainly, not left implicit |
 | Graph memory | `graph_memory.py` | The other legitimate writer besides workers: persists task outcomes, accepted/rejected claims, reviewer disagreements, blocked reasons, and repair patterns as typed `MEMORY_RECORD` nodes (`SUPPORTED_BY`/`REJECTED_BECAUSE`/`DISAGREED_ON`/`REPAIRED_VIA`/`DERIVED_FROM` edges) — structured graph data, not a flattened transcript |
 | Orchestrator | `graph_orchestrator.py` | Fan-out over one paper to the claim/concept/benchmark extractors, collected into one `OrchestrationReport` — schema validation, conflict detection, and the gate decision all still happen inside the *unchanged* `WorkerSpawner.admit()`, not duplicated here |
 | Specialist agent split | `specialist_review.py` | Four bounded roles (extractor, schema validator, conflict checker, reviewer/judge) run as an explicit `task_graph.TaskDAG` (`extract` → `{conflict_check, schema_validate}` in parallel → `reviewer_judge`), each an independent, always-completed `SpecialistVerdict`, reconciled into one `SpecialistPipelineReport` — multi-dimensional review instead of one scalar `ReviewStatus`/confidence, without touching the gate itself; disagreement between specialists is persisted via `graph_memory.record_disagreement` before the real, unchanged `WorkerSpawner.admit()` runs |
@@ -73,6 +74,13 @@ make evals               # == python3 graph_evals.py
 
 # fan a paper out to claim/concept/benchmark extraction, gated as normal
 python3 graph_orchestrator.py
+
+# a real Claude-backed worker, drop-in for ReferenceWorker (needs
+# ANTHROPIC_API_KEY; without one, prints and exits cleanly)
+python3 llm_worker.py
+
+# static type check (pip install -r requirements-dev.txt first)
+make typecheck           # == python3 -m mypy *.py
 
 # run one paper through the four specialist roles (extractor, schema
 # validator, conflict checker, reviewer/judge) over a real concurrent DAG

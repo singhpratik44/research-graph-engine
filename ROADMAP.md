@@ -154,6 +154,41 @@ moves to the next item after `make validate` is green and a human has merged.
   capability gaps (`gap_typed_provenance_edges`, `gap_claim_source_verify`,
   `gap_roadmap_queries`, `gap_adaptive_recovery`, `gap_multidim_review`).
   Merged via PR #1 into `main` (merge commit `bb74dae4`).
+- Repo hardening pass (ad hoc, not part of the sequenced roadmap — same
+  spirit as the QIH corpus and the literature-informed improvements
+  above: infrastructure/portfolio work, not a queued capability gap).
+  - **`LLMWorker`** (`llm_worker.py`). A drop-in for `ReferenceWorker`
+    backed by a real Claude API call instead of regex heuristics,
+    satisfying the identical `ExtractionDirective`-in/`ResultEnvelope`-out
+    contract — `WorkerSpawner.admit()` needs no changes to accept its
+    output. `call_model` is injected (same pattern as `arxiv_ingest.py`'s
+    `http_get`), so parsing/envelope-construction is fully tested (19
+    tests) without a network call; the real call path needs
+    `ANTHROPIC_API_KEY`, which this sandbox has never had, so it's
+    written but not exercised end-to-end here — stated plainly per
+    CLAUDE.md rule 5, not left implicit.
+  - **`make typecheck`** (`mypy.ini`, wired into CI as a step separate
+    from `make validate` — additional rigor, not a redefinition of
+    CLAUDE.md's test+evals+conformance "done" contract). Fixed the real
+    type-honesty gaps it surfaced: a genuine bug in `specialist_review
+    .py`'s `reconcile_and_admit` return-type annotation (bare tuple
+    syntax, not `Tuple[...]`); `research_graph_gates.Provenance
+    .confidence` was typed `float` but already handled `None`
+    defensively — now `Optional[float]`, honestly; the intentional
+    `research_graph_gates.Node`/`research_graph_schema.Node` duck-typing
+    bridge and `graph_memory.py`'s soft `TaskSpan` import fallback are
+    now documented with explicit, reasoned `type: ignore` comments
+    instead of silently mismatching or being blanket-suppressed.
+  - **CI** (`.github/workflows/ci.yml`) running `make validate` and
+    `make typecheck` on every push/PR — previously `make validate` only
+    ever ran locally, so a PR showed zero check runs.
+  - **`LICENSE`** (MIT) and **README screenshots** (`docs/webapp-*.png`,
+    captured from a live `uvicorn` run against the real demo graph) —
+    both closing gaps in what a reader can verify without cloning and
+    running the repo themselves.
+
+  Full suite: 460 tests passing; `make typecheck` clean across all 41
+  modules.
 
 ## Next
 
