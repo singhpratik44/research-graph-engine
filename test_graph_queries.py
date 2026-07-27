@@ -11,7 +11,9 @@ import unittest
 import golden_fixtures as gf
 import literature_corpus as corpus
 import research_graph_gates as gates
-from research_graph_schema import Edge, EdgeType, Node, NodeType, ResearchGraph
+from research_graph_schema import (
+    Edge, EdgeType, ExtractionMethod, Node, NodeType, Provenance, ResearchGraph,
+)
 import graph_queries as q
 
 
@@ -217,6 +219,57 @@ class TestDetectJobDependencyCycles(unittest.TestCase):
         # Real-world sanity check: the shipped fixture graph must not deadlock.
         graph = gf.build_fixture_graph()
         self.assertEqual(q.detect_job_dependency_cycles(graph), [])
+
+
+class TestDerivationMechanismFor(unittest.TestCase):
+    def _prov(self, method):
+        return Provenance("paper_x", method.value, 0.9, "2026-07-27T00:00:00+00:00")
+
+    def test_full_triple_is_structured_relational(self):
+        node = Node("c1", "claim", "x reduces y", self._prov(ExtractionMethod.STRUCTURED_LLM),
+                   {"text": "x reduces y", "subject": "x", "relation": "reduces", "object": "y"})
+        self.assertEqual(q.derivation_mechanism_for(node), "structured_relational")
+
+    def test_memory_record_is_memory_synthesis(self):
+        node = Node("m1", "memory_record", "a memory", self._prov(ExtractionMethod.MEMORY_WRITE),
+                   {"memory_kind": "task_outcome", "summary": "s", "recorded_at": "t",
+                    "subject_ref": "x"})
+        self.assertEqual(q.derivation_mechanism_for(node), "memory_synthesis")
+
+    def test_human_annotated_takes_precedence_over_triple_shape(self):
+        node = Node("c2", "claim", "x reduces y", self._prov(ExtractionMethod.HUMAN_ANNOTATION),
+                   {"text": "x reduces y", "subject": "x", "relation": "reduces", "object": "y"})
+        self.assertEqual(q.derivation_mechanism_for(node), "human_annotated")
+
+    def test_partial_triple_with_text_falls_through_to_structured_named_not_relational(self):
+        """A node with only `subject` set (no relation/object) must not be
+        over-claimed as a full relational triple -- proves the function
+        doesn't guess "relational" from a fragment."""
+        node = Node("c3", "claim", "x", self._prov(ExtractionMethod.STRUCTURED_LLM),
+                   {"text": "x", "subject": "x"})
+        self.assertEqual(q.derivation_mechanism_for(node), "structured_named")
+
+    def test_no_text_and_no_triple_is_unclassified(self):
+        node = Node("c4", "concept", "", self._prov(ExtractionMethod.KEYWORD), {})
+        self.assertEqual(q.derivation_mechanism_for(node), "unclassified")
+
+    def test_no_provenance_still_classifies_from_properties(self):
+        node = Node("c5", "concept", "orchestration", None, {"text": "orchestration"})
+        self.assertEqual(q.derivation_mechanism_for(node), "structured_named")
+
+
+class TestDerivationMechanismBreakdown(unittest.TestCase):
+    def test_counts_each_class(self):
+        prov = Provenance("paper_x", ExtractionMethod.STRUCTURED_LLM.value, 0.9,
+                          "2026-07-27T00:00:00+00:00")
+        graph = ResearchGraph(nodes=[
+            Node("c1", "claim", "x reduces y", prov,
+                {"text": "x reduces y", "subject": "x", "relation": "reduces", "object": "y"}),
+            Node("c2", "concept", "orchestration", prov, {"text": "orchestration"}),
+        ])
+        breakdown = q.derivation_mechanism_breakdown(graph)
+        self.assertEqual(breakdown["structured_relational"], 1)
+        self.assertEqual(breakdown["structured_named"], 1)
 
 
 if __name__ == "__main__":

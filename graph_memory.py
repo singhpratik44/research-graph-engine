@@ -430,6 +430,79 @@ def repair_patterns_for(graph: ResearchGraph, node_type: Optional[str] = None) -
     return out
 
 
+def _outcome_side_for(graph: ResearchGraph, subject_ref: Optional[str]) -> Optional[str]:
+    """
+    Classify a node's current status into "pass" (completed/approved),
+    "fail" (failed/rejected), or None -- still undecided (queued/running/
+    held), or the id no longer resolves to a node. Never a bare guess: the
+    absence of a decided outcome is treated as no data, not as a side.
+    """
+    if not subject_ref:
+        return None
+    node = graph.index().get(subject_ref)
+    if node is None:
+        return None
+    status = (node.properties or {}).get("status")
+    if status in ("completed", "approved"):
+        return "pass"
+    if status in ("failed", "rejected"):
+        return "fail"
+    return None
+
+
+def specialist_trust_scores(graph: ResearchGraph) -> Dict[str, Dict[str, Any]]:
+    """
+    Aggregate every REVIEWER_DISAGREEMENT memory record into a per-role
+    trust tally: how often a role's stated verdict on a disputed node
+    matched what actually happened to that node (its own eventual
+    completed/approved vs. failed/rejected status), vs. how often it
+    didn't. No new signed-edge concept and no schema change -- the ground
+    truth for "who was right" already lives in the graph (the disputed
+    node's own eventual status), just not aggregated until now.
+
+    `trust_score` is `agreements / (agreements + disagreements)`, or
+    `None` when nothing about a role is decided yet -- never a bare
+    0.0/1.0 stand-in for "no data," the same `Optional[float]` discipline
+    `verdict_from_extraction`'s own confidence already follows.
+    """
+    tallies: Dict[str, Dict[str, int]] = {}
+
+    def _tally(role: str) -> Dict[str, int]:
+        return tallies.setdefault(role, {"agreements": 0, "disagreements": 0, "undecided": 0})
+
+    for n in graph.nodes:
+        if (n.type != NodeType.MEMORY_RECORD.value
+                or n.properties.get("memory_kind") != MemoryKind.REVIEWER_DISAGREEMENT.value):
+            continue
+        details = n.properties.get("details", {})
+        side = _outcome_side_for(graph, details.get("node_id"))
+        for role_key, verdict_key in (("reviewer_a", "verdict_a"), ("reviewer_b", "verdict_b")):
+            role = details.get(role_key)
+            if not role:
+                continue
+            tally = _tally(role)
+            if side is None:
+                tally["undecided"] += 1
+            elif details.get(verdict_key) == side:
+                tally["agreements"] += 1
+            else:
+                tally["disagreements"] += 1
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for role, tally in tallies.items():
+        decided = tally["agreements"] + tally["disagreements"]
+        result[role] = {
+            **tally,
+            "trust_score": round(tally["agreements"] / decided, 4) if decided else None,
+        }
+    return result
+
+
+def trust_score_for(graph: ResearchGraph, role: str) -> Optional[float]:
+    """Convenience accessor over specialist_trust_scores(graph)."""
+    return specialist_trust_scores(graph).get(role, {}).get("trust_score")
+
+
 if __name__ == "__main__":
     import json
     import golden_fixtures as gf

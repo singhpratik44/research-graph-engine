@@ -382,6 +382,45 @@ class TestReadFunctions(unittest.TestCase):
 
 
 # ===========================================================================
+# specialist_trust_scores / trust_score_for
+# ===========================================================================
+
+class TestSpecialistTrustScores(unittest.TestCase):
+    def test_role_whose_verdict_matched_the_eventual_outcome_gets_full_trust(self):
+        g = _graph()
+        # job_2606_claims_001's status is "completed" per golden_fixtures.
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        scores = mem.specialist_trust_scores(g)
+        self.assertEqual(scores["schema_validator"]["agreements"], 1)
+        self.assertEqual(scores["schema_validator"]["disagreements"], 0)
+        self.assertAlmostEqual(scores["schema_validator"]["trust_score"], 1.0)
+        self.assertEqual(scores["conflict_checker"]["disagreements"], 1)
+        self.assertAlmostEqual(scores["conflict_checker"]["trust_score"], 0.0)
+        self.assertEqual(mem.trust_score_for(g, "schema_validator"), 1.0)
+
+    def test_undecided_outcome_never_falsely_counts_as_a_disagreement(self):
+        """job_2606_concepts_001's status is "held" -- not completed/approved/
+        failed/rejected -- so neither reviewer should be blamed or credited
+        before the outcome actually exists."""
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_concepts_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        scores = mem.specialist_trust_scores(g)
+        self.assertEqual(scores["schema_validator"]["agreements"], 0)
+        self.assertEqual(scores["schema_validator"]["disagreements"], 0)
+        self.assertEqual(scores["schema_validator"]["undecided"], 1)
+        self.assertIsNone(scores["schema_validator"]["trust_score"])
+        self.assertIsNone(mem.trust_score_for(g, "conflict_checker"))
+
+    def test_unknown_role_returns_none_not_a_key_error(self):
+        g = _graph()
+        self.assertIsNone(mem.trust_score_for(g, "nobody_ever_recorded"))
+
+
+# ===========================================================================
 # Everything together: a graph that has recorded all five/six memory kinds
 # still validates cleanly, and the published JSON schema matches.
 # ===========================================================================
