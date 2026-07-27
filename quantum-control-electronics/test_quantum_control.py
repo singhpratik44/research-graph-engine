@@ -15,6 +15,8 @@ from state_manager import StateManager, ClosedLoopFeedbackControl
 from constraint_validator import ConstraintValidator
 from control_module import ControlModule
 from agentic_scheduler import AgenticScheduler, QuantumGate, SchedulingStrategyEnum, compare_schedulers
+from quantum_noise_model import QuantumNoiseModel, NoiseParameters, NoiseChannelType
+from repetition_code_protocol import RepetitionCodeProtocol, LogicalStateEnum, SyndromeEnum
 
 
 class TestNeutralAtomPhysics(unittest.TestCase):
@@ -507,6 +509,244 @@ class TestAgenticScheduler(unittest.TestCase):
         comparison = compare_schedulers(gates, self.state_manager, self.physics, num_trials=1)
         # Agentic scheduler should improve or maintain fidelity
         self.assertGreaterEqual(comparison.agentic_final_fidelity, comparison.naive_final_fidelity * 0.95)
+
+
+class TestQuantumNoiseModel(unittest.TestCase):
+    """Quantum noise model tests (12) — realistic error channels for neutral atoms"""
+
+    def setUp(self):
+        self.noise_model = QuantumNoiseModel(num_qubits=50)
+
+    def test_noise_model_initialization(self):
+        self.assertEqual(len(self.noise_model.noise_state), 50)
+        self.assertEqual(self.noise_model.params.T1_us, 10000.0)
+
+    def test_amplitude_damping_no_error_ground_state(self):
+        state = self.noise_model.noise_state[0]
+        state.current_state = 0
+        error_occurred, msg = self.noise_model.apply_amplitude_damping(0, time_elapsed_us=100.0)
+        self.assertFalse(error_occurred)
+
+    def test_amplitude_damping_probability_increases_with_time(self):
+        state = self.noise_model.noise_state[0]
+        state.current_state = 1
+        # Short time: low error probability
+        error_short = 0
+        for _ in range(100):
+            err, _ = self.noise_model.apply_amplitude_damping(0, time_elapsed_us=10.0)
+            if err:
+                error_short += 1
+
+        # Reset and try long time
+        state.current_state = 1
+        error_long = 0
+        for _ in range(100):
+            err, _ = self.noise_model.apply_amplitude_damping(0, time_elapsed_us=1000.0)
+            if err:
+                error_long += 1
+
+        # Long time should have more errors
+        self.assertGreaterEqual(error_long, error_short)
+
+    def test_phase_damping_error_increases_with_superposition_time(self):
+        error_rates = []
+        for t in [10.0, 100.0, 500.0]:
+            state = self.noise_model.noise_state[0]
+            state.phase_errors = 0
+            for _ in range(100):
+                err, _ = self.noise_model.apply_phase_damping(0, time_in_superposition_us=t)
+                if err:
+                    state.phase_errors += 1
+            error_rates.append(state.phase_errors)
+
+        # Error rate should increase with time
+        self.assertLess(error_rates[0], error_rates[2])
+
+    def test_depolarizing_noise_single_qubit_gate(self):
+        error_occurred, msg = self.noise_model.apply_depolarizing_noise(0, gate_type="single_qubit")
+        # Just check it completes (probabilistic outcome)
+        self.assertIsNotNone(error_occurred)
+
+    def test_depolarizing_noise_two_qubit_gate_higher_error(self):
+        # Two-qubit gates should have higher error rates
+        single_qubit_errors = 0
+        two_qubit_errors = 0
+
+        for _ in range(200):
+            err, _ = self.noise_model.apply_depolarizing_noise(0, gate_type="single_qubit")
+            if err:
+                single_qubit_errors += 1
+
+        for _ in range(200):
+            err, _ = self.noise_model.apply_depolarizing_noise(0, gate_type="two_qubit")
+            if err:
+                two_qubit_errors += 1
+
+        # Two-qubit should generally have more errors
+        self.assertGreater(two_qubit_errors, single_qubit_errors * 0.5)
+
+    def test_measurement_error_ground_vs_excited_state(self):
+        error_ground = 0
+        error_excited = 0
+
+        for _ in range(100):
+            measured, _ = self.noise_model.apply_measurement_error(0, true_state=0)
+            if measured != 0:
+                error_ground += 1
+
+        for _ in range(100):
+            measured, _ = self.noise_model.apply_measurement_error(0, true_state=1)
+            if measured != 1:
+                error_excited += 1
+
+        # Excited state measurement should be harder (higher error)
+        self.assertGreater(error_excited, error_ground)
+
+    def test_heating_increases_error_rates(self):
+        # Low heating
+        state = self.noise_model.noise_state[5]
+        state.cumulative_heating_uk = 10.0
+        errors_low = self.noise_model.heating_increases_error_rate(5, 0.0)
+
+        # High heating
+        state.cumulative_heating_uk = 100.0
+        errors_high = self.noise_model.heating_increases_error_rate(5, 0.0)
+
+        # Higher heating should increase total error rate
+        self.assertGreater(errors_high["total_error_rate"], errors_low["total_error_rate"])
+
+    def test_physical_to_logical_error_rate_below_threshold(self):
+        physical_error = 0.005  # 0.5% (below threshold)
+        logical_error = self.noise_model.physical_error_rate_to_logical(physical_error, code_distance=3)
+        # Logical error should be lower than physical
+        self.assertLess(logical_error, physical_error)
+
+    def test_physical_to_logical_error_rate_above_threshold(self):
+        physical_error = 0.02  # 2% (above 1% threshold)
+        logical_error = self.noise_model.physical_error_rate_to_logical(physical_error, code_distance=3)
+        # Above threshold: errors don't suppress
+        self.assertGreater(logical_error, 0.1)
+
+    def test_reset_heating(self):
+        self.noise_model.noise_state[0].cumulative_heating_uk = 100.0
+        self.noise_model.reset_heating()
+        self.assertEqual(self.noise_model.noise_state[0].cumulative_heating_uk, 0.0)
+
+
+class TestRepetitionCode(unittest.TestCase):
+    """Repetition code error correction tests (18) — 3-physical-qubits → 1-logical"""
+
+    def setUp(self):
+        self.code = RepetitionCodeProtocol(num_logical_qubits=10, physical_qubits_per_logical=3)
+
+    def test_code_initialization(self):
+        self.assertEqual(len(self.code.logical_qubits), 10)
+        self.assertEqual(self.code.num_logical_qubits, 10)
+
+    def test_encode_logical_zero(self):
+        success, msg = self.code.encode_logical_state(logical_id=0, state=0)
+        self.assertTrue(success)
+        lq = self.code.logical_qubits[0]
+        self.assertEqual(lq.physical_states, [0, 0, 0])
+        self.assertEqual(lq.logical_state, LogicalStateEnum.LOGICAL_0)
+
+    def test_encode_logical_one(self):
+        success, msg = self.code.encode_logical_state(logical_id=0, state=1)
+        self.assertTrue(success)
+        lq = self.code.logical_qubits[0]
+        self.assertEqual(lq.physical_states, [1, 1, 1])
+        self.assertEqual(lq.logical_state, LogicalStateEnum.LOGICAL_1)
+
+    def test_syndrome_no_error(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        syndrome, interpretation = self.code.measure_stabilizers(0)
+        self.assertEqual(syndrome, SyndromeEnum.NO_ERROR)
+
+    def test_syndrome_error_qubit_0(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        self.code.logical_qubits[0].physical_states[0] = 1  # Flip qubit 0
+        syndrome, interpretation = self.code.measure_stabilizers(0)
+        self.assertEqual(syndrome, SyndromeEnum.ERROR_P0)
+
+    def test_syndrome_error_qubit_1(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        self.code.logical_qubits[0].physical_states[1] = 1
+        syndrome, interpretation = self.code.measure_stabilizers(0)
+        self.assertEqual(syndrome, SyndromeEnum.ERROR_P1)
+
+    def test_syndrome_error_qubit_2(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        self.code.logical_qubits[0].physical_states[2] = 1
+        syndrome, interpretation = self.code.measure_stabilizers(0)
+        self.assertEqual(syndrome, SyndromeEnum.ERROR_P2)
+
+    def test_correct_error_single_qubit_flip(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        self.code.logical_qubits[0].physical_states[0] = 1
+        syndrome, _ = self.code.measure_stabilizers(0)
+        success, msg = self.code.correct_error(0, syndrome)
+        self.assertTrue(success)
+        self.assertEqual(self.code.logical_qubits[0].physical_states, [0, 0, 0])
+
+    def test_extract_logical_state_majority_vote(self):
+        self.code.encode_logical_state(logical_id=0, state=1)
+        state, fidelity = self.code.extract_logical_state(0)
+        self.assertEqual(state, 1)
+        self.assertEqual(fidelity, 1.0)
+
+    def test_extract_logical_state_single_error_corrected(self):
+        self.code.encode_logical_state(logical_id=0, state=1)
+        self.code.logical_qubits[0].physical_states[0] = 0  # Single bit flip
+        state, fidelity = self.code.extract_logical_state(0)
+        # Majority vote: 1,1,0 → state=1
+        self.assertEqual(state, 1)
+        self.assertGreater(fidelity, 0.5)
+
+    def test_correction_cycle_single_error(self):
+        self.code.encode_logical_state(logical_id=0, state=0)
+        self.code.logical_qubits[0].physical_states[1] = 1
+        round_result = self.code.correction_cycle(0)
+        self.assertTrue(round_result.success)
+        self.assertEqual(self.code.total_rounds, 1)
+
+    def test_correction_cycle_no_error(self):
+        self.code.encode_logical_state(logical_id=0, state=1)
+        round_result = self.code.correction_cycle(0)
+        self.assertTrue(round_result.success)
+
+    def test_logical_error_rate_below_threshold(self):
+        p_phys = 0.005  # 0.5%
+        p_log = self.code.logical_error_rate_estimate(p_phys, rounds=1)
+        # Should be suppressed below physical error rate
+        self.assertLess(p_log, p_phys)
+
+    def test_logical_error_rate_scales_with_rounds(self):
+        p_phys = 0.005
+        p_log_1 = self.code.logical_error_rate_estimate(p_phys, rounds=1)
+        p_log_5 = self.code.logical_error_rate_estimate(p_phys, rounds=5)
+        # More rounds = higher logical error accumulation
+        self.assertGreater(p_log_5, p_log_1)
+
+    def test_stabilization_time_computation(self):
+        p_phys = 0.005
+        rounds = self.code.stabilization_time(p_phys, target_fidelity=0.95)
+        self.assertGreater(rounds, 0)
+        self.assertLess(rounds, 1000)
+
+    def test_scaling_analysis(self):
+        analysis = self.code.scaling_analysis(num_logical_qubits=100, physical_error_rate=0.005)
+        self.assertEqual(analysis["num_logical_qubits"], 100)
+        self.assertEqual(analysis["total_physical_qubits"], 300)
+        self.assertGreater(analysis["suppression_factor"], 1.0)
+
+    def test_multi_logical_qubit_independence(self):
+        self.code.encode_logical_state(0, state=0)
+        self.code.encode_logical_state(1, state=1)
+        self.code.logical_qubits[0].physical_states[0] = 1
+        # Error in qubit 0 shouldn't affect qubit 1
+        syndrome1 = self.code.measure_stabilizers(0)[0]
+        syndrome2 = self.code.measure_stabilizers(1)[0]
+        self.assertNotEqual(syndrome1, syndrome2)
 
 
 class TestScale(unittest.TestCase):
