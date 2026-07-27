@@ -10,7 +10,12 @@ extraction jobs. graph_orchestrator.py's paper fan-out could be re-expressed
 as a TaskDAG later; this module doesn't require that yet.
 
 Four pieces:
-  TaskNode / TaskEdge -- the work DAG (typed, closed-enum status)
+  TaskNode / TaskEdge -- the work DAG (typed, closed-enum status).
+                         `TaskDAG.detect_hazards()` is a static analysis
+                         pass over this structure alone, before any
+                         scheduling happens -- dangling parent_task_id
+                         references and disconnected ("island") tasks,
+                         complementing detect_cycles()'s runtime check
   TaskSpan            -- one task's execution record: task_id, agent_id,
                          parent_task_id, status, confidence, started_at,
                          ended_at -- the observability unit the survey calls for
@@ -150,6 +155,50 @@ class TaskDAG:
     def ready_tasks(self, completed: Set[str], remaining: Set[str]) -> List[str]:
         """Tasks in `remaining` whose every dependency is already in `completed`."""
         return [t for t in remaining if all(d in completed for d in self.dependencies_of(t))]
+
+    def detect_hazards(self) -> List[str]:
+        """
+        Static analysis over the DAG's structure alone, before any
+        scheduling happens -- complementing `detect_cycles()`'s runtime
+        check with issues `Scheduler.run()` would never itself surface
+        (dangling `parent_task_id`, disconnected tasks don't stop a run;
+        they just sit there). AgentFlow (2026) argues static analysis of
+        agent-program dependency graphs catches structural hazards before
+        an agent program runs, rather than only discovering them at
+        runtime; this applies that same discipline to `TaskDAG` itself.
+
+        Two hazards, both pure/read-only, returned as human-readable
+        strings (same spirit as `failed_ancestors`' cascade messages, not
+        a new typed exception hierarchy for a diagnostic that never blocks
+        anything on its own):
+          - a `parent_task_id` that doesn't reference any real task_id in
+            this DAG (a grouping reference nobody added) -- distinct from
+            an `add_dependency` edge, so `add_task`/`add_dependency`'s own
+            existing validation can't catch it.
+          - a task with zero incoming AND zero outgoing DEPENDS_ON edges
+            in a DAG with more than one task -- an island, possibly a
+            forgotten `add_dependency` call. A single-task DAG is not
+            flagged; there's nothing for it to be disconnected from.
+        """
+        hazards: List[str] = []
+        for task_id, node in sorted(self.nodes.items()):
+            if node.parent_task_id is not None and node.parent_task_id not in self.nodes:
+                hazards.append(
+                    f"task {task_id!r} has parent_task_id {node.parent_task_id!r}, "
+                    f"which is not a task in this DAG")
+
+        if len(self.nodes) > 1:
+            touched: Set[str] = set()
+            for e in self.edges:
+                touched.add(e.source)
+                touched.add(e.target)
+            for task_id in sorted(self.nodes):
+                if task_id not in touched:
+                    hazards.append(
+                        f"task {task_id!r} has no dependency edges at all -- "
+                        f"disconnected from the rest of the DAG")
+
+        return hazards
 
     def failed_ancestors(self, task_id: str, failed: Set[str]) -> List[str]:
         """

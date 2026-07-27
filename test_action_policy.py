@@ -412,5 +412,158 @@ class TestApproveEscalatedAction(unittest.TestCase):
             ap.approve_escalated_action(self.spawner, decision, "alice")
 
 
+class TestAllRuleVerdictsAndConflicts(unittest.TestCase):
+    """Meta-policy conflict visibility: every rule that fired is recorded,
+    not just the one that won precedence."""
+
+    def test_single_firing_rule_has_no_conflict(self):
+        policy = ap.ActionPolicy(rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})])
+        decision = policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        self.assertEqual(decision.all_rule_verdicts, [("deny_extraction_types", "blocked",
+                                                       decision.reason)])
+        self.assertFalse(decision.has_conflicting_rules)
+
+    def test_no_firing_rule_has_no_conflict(self):
+        policy = ap.ActionPolicy(rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})])
+        decision = policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CLAIMS))
+        self.assertEqual(decision.all_rule_verdicts, [])
+        self.assertFalse(decision.has_conflicting_rules)
+
+    def test_two_rules_agreeing_is_not_a_conflict(self):
+        policy = ap.ActionPolicy(rules=[
+            ap.require_escalation_for({ExtractionType.BENCHMARKS}),
+            ("second_escalator", lambda a: (ap.PolicyVerdict.ESCALATED, "also wants review")
+                                 if a.extraction_type == ExtractionType.BENCHMARKS else None),
+        ])
+        decision = policy.authorize(ap.ProposedAction(PAPER, ExtractionType.BENCHMARKS))
+        self.assertEqual(len(decision.all_rule_verdicts), 2)
+        self.assertFalse(decision.has_conflicting_rules)
+
+    def test_block_and_escalate_rules_both_firing_is_a_real_conflict(self):
+        policy = ap.ActionPolicy(rules=[
+            ap.require_escalation_for({ExtractionType.CONFLICTS}),
+            ap.deny_extraction_types({ExtractionType.CONFLICTS}),
+        ])
+        decision = policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        # BLOCKED still wins precedence...
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+        # ...but the conflict with the earlier ESCALATE rule is now visible, not hidden.
+        self.assertTrue(decision.has_conflicting_rules)
+        self.assertEqual([v for _, v, _ in decision.all_rule_verdicts], ["escalated", "blocked"])
+
+    def test_post_execution_rules_also_record_all_verdicts(self):
+        policy = ap.ActionPolicy(post_execution_rules=[
+            ap.escalate_on_worker_failure(),
+            ap.max_nodes_produced_ceiling(1),
+        ])
+        action = ap.ProposedAction(PAPER, ExtractionType.CLAIMS)
+        outcome = ap.ExecutionOutcome(worker_status="failed", node_count=5, avg_confidence=0.9)
+        decision = policy.authorize_outcome(action, outcome)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+        self.assertTrue(decision.has_conflicting_rules)
+
+    def test_to_dict_exposes_conflict_fields(self):
+        policy = ap.ActionPolicy(rules=[
+            ap.require_escalation_for({ExtractionType.CONFLICTS}),
+            ap.deny_extraction_types({ExtractionType.CONFLICTS}),
+        ])
+        d = policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS)).to_dict()
+        self.assertTrue(d["has_conflicting_rules"])
+        self.assertEqual(len(d["all_rule_verdicts"]), 2)
+
+
+class TestObligations(unittest.TestCase):
+    def test_no_obligation_rules_never_creates_anything(self):
+        policy = ap.ActionPolicy(rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        self.assertEqual(policy.obligations, [])
+
+    def test_notify_on_verdict_creates_a_pending_obligation_on_match(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})],
+            obligation_rules=[ap.notify_on_verdict(
+                {ap.PolicyVerdict.BLOCKED}, "notify the paper owner within 1 business day")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        self.assertEqual(len(policy.obligations), 1)
+        obligation = policy.obligations[0]
+        self.assertEqual(obligation.status, "pending")
+        self.assertEqual(obligation.description, "notify the paper owner within 1 business day")
+
+    def test_no_obligation_when_verdict_does_not_match(self):
+        policy = ap.ActionPolicy(
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CLAIMS))  # ALLOWED
+        self.assertEqual(policy.obligations, [])
+
+    def test_post_execution_decisions_also_trigger_obligations(self):
+        policy = ap.ActionPolicy(
+            post_execution_rules=[ap.escalate_on_worker_failure()],
+            obligation_rules=[ap.notify_on_verdict(
+                {ap.PolicyVerdict.ESCALATED}, "notify reviewer")])
+        action = ap.ProposedAction(PAPER, ExtractionType.CLAIMS)
+        outcome = ap.ExecutionOutcome(worker_status="failed", node_count=0, avg_confidence=0.0)
+        policy.authorize_outcome(action, outcome)
+        self.assertEqual(len(policy.obligations), 1)
+
+    def test_fulfill_obligation_marks_it_resolved(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})],
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        obligation_id = policy.obligations[0].obligation_id
+        resolved = ap.fulfill_obligation(policy, obligation_id, evidence="emailed the team")
+        self.assertEqual(resolved.status, "fulfilled")
+        self.assertEqual(resolved.resolution_note, "emailed the team")
+        self.assertIsNotNone(resolved.resolved_at)
+
+    def test_fulfilling_an_already_resolved_obligation_raises(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})],
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        obligation_id = policy.obligations[0].obligation_id
+        ap.fulfill_obligation(policy, obligation_id)
+        with self.assertRaises(ValueError):
+            ap.fulfill_obligation(policy, obligation_id)
+
+    def test_dispense_obligation_marks_it_resolved_with_who_and_why(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})],
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        obligation_id = policy.obligations[0].obligation_id
+        resolved = ap.dispense_obligation(policy, obligation_id, "alice", "already reported manually")
+        self.assertEqual(resolved.status, "dispensed")
+        self.assertEqual(resolved.resolved_by, "alice")
+        self.assertEqual(resolved.resolution_note, "already reported manually")
+
+    def test_dispensing_an_already_resolved_obligation_raises(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS})],
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        obligation_id = policy.obligations[0].obligation_id
+        ap.dispense_obligation(policy, obligation_id, "alice", "handled elsewhere")
+        with self.assertRaises(ValueError):
+            ap.dispense_obligation(policy, obligation_id, "bob", "too late")
+
+    def test_pending_obligations_excludes_resolved_ones(self):
+        policy = ap.ActionPolicy(
+            rules=[ap.deny_extraction_types({ExtractionType.CONFLICTS, ExtractionType.BENCHMARKS})],
+            obligation_rules=[ap.notify_on_verdict({ap.PolicyVerdict.BLOCKED}, "notify")])
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.CONFLICTS))
+        policy.authorize(ap.ProposedAction(PAPER, ExtractionType.BENCHMARKS))
+        self.assertEqual(len(ap.pending_obligations(policy)), 2)
+        ap.fulfill_obligation(policy, policy.obligations[0].obligation_id)
+        remaining = ap.pending_obligations(policy)
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0].obligation_id, policy.obligations[1].obligation_id)
+
+    def test_unknown_obligation_id_raises_key_error(self):
+        policy = ap.ActionPolicy()
+        with self.assertRaises(KeyError):
+            ap.fulfill_obligation(policy, "obl_9999")
+
+
 if __name__ == "__main__":
     unittest.main()

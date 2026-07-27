@@ -97,6 +97,45 @@ class TestConflicts(unittest.TestCase):
         self.assertEqual(q.contradicting_claims(graph, "claim_paper_2606_04990_relevance"), [])
 
 
+class TestAttributedPositionsFor(unittest.TestCase):
+    def setUp(self):
+        self.graph = gf.build_fixture_graph()
+
+    def test_returns_every_claim_sharing_subject_and_object(self):
+        positions = q.attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual({p["claim_id"] for p in positions},
+                         {"claim_2606_001", "claim_2701_014"})
+
+    def test_each_position_carries_its_own_source_and_relation(self):
+        positions = q.attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        by_id = {p["claim_id"]: p for p in positions}
+        self.assertEqual(by_id["claim_2606_001"]["relation"], "reduces")
+        self.assertEqual(by_id["claim_2701_014"]["relation"], "increases")
+        self.assertNotEqual(by_id["claim_2606_001"]["source_paper"],
+                            by_id["claim_2701_014"]["source_paper"])
+        self.assertAlmostEqual(by_id["claim_2606_001"]["confidence"], 0.91)
+
+    def test_no_shared_subject_object_returns_empty(self):
+        positions = q.attributed_positions_for(self.graph, "nobody", "nothing")
+        self.assertEqual(positions, [])
+
+    def test_non_claim_nodes_are_never_returned(self):
+        """Sanity: even if some other node type happened to carry matching
+        subject/object properties, only CLAIM nodes qualify."""
+        positions = q.attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        for p in positions:
+            node = q.get_node(self.graph, p["claim_id"])
+            self.assertEqual(node.type, NodeType.CLAIM.value)
+
+    def test_never_mutates_the_graph(self):
+        before = len(self.graph.nodes)
+        q.attributed_positions_for(self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(len(self.graph.nodes), before)
+
+
 class TestWhyBlockedAndBlockedJobs(unittest.TestCase):
     def test_why_blocked_on_low_confidence_job(self):
         graph = gf.build_fixture_graph()

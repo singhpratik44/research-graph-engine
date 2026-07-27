@@ -7,7 +7,7 @@ question: "how good are the graph's answers, right now, against a corpus of
 known expectations" -- a number that can regress even while every unit test
 still passes (e.g. an extraction worker quietly gets shyer about what it emits).
 
-Four eval categories, each a plain dataclass with nothing framework-shaped
+Six eval categories, each a plain dataclass with nothing framework-shaped
 about it, so a new case is one more line in a registry:
 
   QUERY_EVALS         -- a graph_queries function returns the expected answer
@@ -21,6 +21,16 @@ about it, so a new case is one more line in a registry:
                          golden_fixtures.waived_graph_with_defect(), the one
                          place this repo already encodes "this used to be
                          a bug, keep proving it's fixed."
+  CONSTRUCTION_QUALITY_CASES -- corpus-level KG construction quality
+                         (claim field completeness, duplicate text,
+                         orphaned nodes) -- a systemic-pipeline signal
+                         per-node schema validation doesn't surface, per
+                         KGCQual (2026)
+  MEMORY_EFFECTIVENESS_CASES -- whether a recorded REPAIR_PATTERN actually
+                         leaves behind a real, resolvable outcome a later
+                         run could reuse -- thin evidence (one 2026
+                         workshop paper), a narrow honest proxy, not a
+                         general claim that "memory helps"
 
 run_all() executes every case and returns an EvalReport; render_report()
 turns that into the same kind of plain-text summary graph_inspector.py gives
@@ -32,10 +42,11 @@ from typing import Any, Callable, List, Optional, Set, Tuple
 
 import golden_fixtures as gf
 import literature_corpus as corpus
+import graph_memory as memory
 import graph_queries as q
 import graph_roadmap as roadmap
 import research_graph_gates as gates
-from research_graph_schema import ExtractionType, NodeType, ResearchGraph
+from research_graph_schema import ExtractionType, MemoryKind, NodeType, ResearchGraph
 from research_graph_workers import ReferenceWorker, WorkerSpawner
 
 
@@ -269,6 +280,137 @@ def run_regression_cases() -> List[EvalResult]:
 
 
 # ============================================================================
+# 5. Corpus-level construction-quality checks
+# ============================================================================
+# Per-node schema validation (research_graph_gates.py's checks) can't see a
+# systemic extraction-pipeline problem that shows up only across the whole
+# corpus -- KGCQual (2026) names exactly this gap. Each metric returns a
+# float in [0, 1]; a case passes when that float matches `expected` within
+# `tolerance`, the same score-style pattern EXTRACTION_CHECKS already uses.
+
+@dataclass
+class GraphMetricCase:
+    name: str
+    graph_builder: Callable[[], ResearchGraph]
+    metric: Callable[[ResearchGraph], float]
+    expected: float
+    tolerance: float = 0.0001
+
+
+def claim_field_completeness(graph: ResearchGraph) -> float:
+    """Fraction of claim nodes with subject+relation+object all populated.
+    1.0 (vacuously complete) when there are no claim nodes at all."""
+    claims = [n for n in graph.nodes if n.type == NodeType.CLAIM.value]
+    if not claims:
+        return 1.0
+    complete = [c for c in claims
+                if all(c.properties.get(f) for f in ("subject", "relation", "object"))]
+    return len(complete) / len(claims)
+
+
+def duplicate_text_ratio(graph: ResearchGraph) -> float:
+    """Fraction of CLAIM/CONCEPT nodes whose `text` property exactly
+    matches another node of the same type -- a spurious-duplication proxy
+    for systemic extraction-pipeline issues, distinct from any single
+    node's own schema validity. 0.0 (vacuously clean) with no such nodes."""
+    groups: dict = {}
+    total = 0
+    for n in graph.nodes:
+        if n.type not in (NodeType.CLAIM.value, NodeType.CONCEPT.value):
+            continue
+        total += 1
+        groups.setdefault((n.type, n.properties.get("text", "")), []).append(n.id)
+    if total == 0:
+        return 0.0
+    duplicated = sum(len(ids) for ids in groups.values() if len(ids) > 1)
+    return duplicated / total
+
+
+def orphaned_node_ratio(graph: ResearchGraph) -> float:
+    """Fraction of nodes with no edge touching them at all -- structurally
+    isolated, possibly indicating a broken extraction that never got wired
+    into the graph's PRODUCES/DERIVED_FROM/etc. relations. 0.0 with an
+    empty graph -- nothing to be orphaned from."""
+    if not graph.nodes:
+        return 0.0
+    connected: Set[str] = set()
+    for e in graph.edges:
+        connected.add(e.source)
+        connected.add(e.target)
+    orphaned = [n for n in graph.nodes if n.id not in connected]
+    return len(orphaned) / len(graph.nodes)
+
+
+CONSTRUCTION_QUALITY_CASES: List[GraphMetricCase] = [
+    GraphMetricCase("golden fixture claims are fully structured",
+                    gf.build_fixture_graph, claim_field_completeness, 1.0),
+    GraphMetricCase("literature corpus claims are fully structured",
+                    corpus.build_corpus_graph, claim_field_completeness, 1.0),
+    GraphMetricCase("literature corpus has no duplicate claim/concept text",
+                    corpus.build_corpus_graph, duplicate_text_ratio, 0.0),
+    GraphMetricCase("literature corpus has no orphaned nodes",
+                    corpus.build_corpus_graph, orphaned_node_ratio, 0.0),
+]
+
+
+def run_graph_metric_case(case: GraphMetricCase, category: str) -> EvalResult:
+    try:
+        value = case.metric(case.graph_builder())
+        ok = abs(value - case.expected) <= case.tolerance
+        detail = f"got {value:.4f}, expected {case.expected:.4f}"
+    except Exception as exc:
+        return EvalResult(case.name, category, False, f"raised {exc!r}")
+    return EvalResult(case.name, category, ok, detail, score=value)
+
+
+def run_construction_quality_checks() -> List[EvalResult]:
+    return [run_graph_metric_case(c, "construction_quality") for c in CONSTRUCTION_QUALITY_CASES]
+
+
+# ============================================================================
+# 6. Memory-effectiveness check (thin evidence -- one 2026 workshop paper)
+# ============================================================================
+
+def repair_pattern_effectiveness(graph: ResearchGraph) -> float:
+    """
+    Fraction of REPAIR_PATTERN memory records whose `after_node_id` still
+    resolves to a real node in the graph -- a repair a later run could
+    actually find and reuse, as opposed to one recorded but orphaned.
+    Returns 1.0 (vacuously effective) when no repair patterns exist yet --
+    there's nothing to have failed.
+    """
+    idx = graph.index()
+    records = [n for n in graph.nodes
+               if n.type == NodeType.MEMORY_RECORD.value
+               and n.properties.get("memory_kind") == MemoryKind.REPAIR_PATTERN.value]
+    if not records:
+        return 1.0
+    resolvable = sum(1 for r in records
+                     if r.properties.get("details", {}).get("after_node_id") in idx)
+    return resolvable / len(records)
+
+
+def _fixture_graph_with_one_repair_pattern() -> ResearchGraph:
+    graph = gf.build_fixture_graph()
+    memory.record_repair_pattern(
+        graph, "re-extracted with a higher confidence floor",
+        before_node_id="job_2606_concepts_001", after_node_id="job_2606_claims_001")
+    return graph
+
+
+MEMORY_EFFECTIVENESS_CASES: List[GraphMetricCase] = [
+    GraphMetricCase("no repair patterns recorded is vacuously effective",
+                    gf.build_fixture_graph, repair_pattern_effectiveness, 1.0),
+    GraphMetricCase("a repair pattern's after_node resolves to a real node",
+                    _fixture_graph_with_one_repair_pattern, repair_pattern_effectiveness, 1.0),
+]
+
+
+def run_memory_effectiveness_checks() -> List[EvalResult]:
+    return [run_graph_metric_case(c, "memory_effectiveness") for c in MEMORY_EFFECTIVENESS_CASES]
+
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -278,13 +420,16 @@ def run_all() -> EvalReport:
     results += run_gate_audits()
     results += run_extraction_checks()
     results += run_regression_cases()
+    results += run_construction_quality_checks()
+    results += run_memory_effectiveness_checks()
     return EvalReport(results)
 
 
 def render_report(report: Optional[EvalReport] = None) -> str:
     report = report or run_all()
     lines = [f"EVAL REPORT: {report.passed}/{report.total} passed"]
-    for category in ("query", "gate_audit", "extraction", "regression"):
+    for category in ("query", "gate_audit", "extraction", "regression",
+                     "construction_quality", "memory_effectiveness"):
         rows = report.by_category(category)
         if not rows:
             continue

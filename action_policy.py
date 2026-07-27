@@ -75,10 +75,27 @@ class PolicyDecision:
     rule_name: str
     action: ProposedAction
     timestamp: str = field(default_factory=_now)
+    # Every rule that had an opinion on this action (returned non-None), not
+    # just the one that won precedence -- (rule_name, verdict_value, reason)
+    # triples. AgenticRei (arXiv 2606.19464) argues runtime policy engines
+    # need meta-policy conflict resolution as a visible, auditable fact, not
+    # just a silently-applied precedence order. Empty for a decision where
+    # only one rule (or zero) fired -- the common case, and the same shape
+    # every existing decision already has (this field defaults empty, so no
+    # existing construction of PolicyDecision needs to change).
+    all_rule_verdicts: List[Tuple[str, str, str]] = field(default_factory=list)
 
     @property
     def can_proceed(self) -> bool:
         return self.verdict in (PolicyVerdict.ALLOWED, PolicyVerdict.ESCALATED)
+
+    @property
+    def has_conflicting_rules(self) -> bool:
+        """True when more than one distinct verdict was rendered by the
+        rules that fired on this action -- a real meta-policy conflict
+        (e.g. one rule would ESCALATE, another would BLOCK), not just
+        multiple rules agreeing on the same verdict."""
+        return len({v for _, v, _ in self.all_rule_verdicts}) > 1
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -92,6 +109,8 @@ class PolicyDecision:
                 "max_results": self.action.max_results,
             },
             "timestamp": self.timestamp,
+            "all_rule_verdicts": [list(v) for v in self.all_rule_verdicts],
+            "has_conflicting_rules": self.has_conflicting_rules,
         }
 
 
@@ -123,6 +142,51 @@ class ExecutionOutcome:
 PostExecutionRule = Callable[[ProposedAction, ExecutionOutcome], Optional[Tuple[PolicyVerdict, str]]]
 
 
+@dataclass
+class Obligation:
+    """
+    A standing duty a rendered PolicyDecision creates -- "if this fires, X
+    must happen (or be explicitly waived)" -- distinct from the verdict
+    itself. AgenticRei (arXiv 2606.19464) names obligation-lifecycle
+    management and dispensations (governed waivers) as primitives that
+    XACML/Rego/Cedar-style permit/prohibit policies don't model on their
+    own; ALLOWED/ESCALATED/BLOCKED alone can't represent "this was allowed,
+    AND someone must be notified within N steps."
+
+    `status` moves pending -> fulfilled (someone did the required thing) or
+    pending -> dispensed (a human explicitly waived it, on the record) --
+    never silently dropped or left ambiguous.
+    """
+    obligation_id: str
+    description: str
+    rule_name: str
+    decision: PolicyDecision
+    status: str = "pending"  # "pending" | "fulfilled" | "dispensed"
+    created_at: str = field(default_factory=_now)
+    resolved_at: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolution_note: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "obligation_id": self.obligation_id,
+            "description": self.description,
+            "rule_name": self.rule_name,
+            "decision": self.decision.to_dict(),
+            "status": self.status,
+            "created_at": self.created_at,
+            "resolved_at": self.resolved_at,
+            "resolved_by": self.resolved_by,
+            "resolution_note": self.resolution_note,
+        }
+
+
+# An obligation rule inspects a rendered PolicyDecision (pre- or
+# post-execution) and optionally returns a description string naming the
+# duty it creates; None means this decision creates no obligation.
+ObligationRule = Callable[[PolicyDecision], Optional[str]]
+
+
 class ActionPolicy:
     """
     Centralized, pluggable action-level policy, evaluated per action.
@@ -139,22 +203,50 @@ class ActionPolicy:
         self,
         rules: Optional[List[Tuple[str, PolicyRule]]] = None,
         post_execution_rules: Optional[List[Tuple[str, PostExecutionRule]]] = None,
+        obligation_rules: Optional[List[Tuple[str, ObligationRule]]] = None,
     ):
         self.rules: List[Tuple[str, PolicyRule]] = list(rules or [])
         self.post_execution_rules: List[Tuple[str, PostExecutionRule]] = list(
             post_execution_rules or [])
+        self.obligation_rules: List[Tuple[str, ObligationRule]] = list(obligation_rules or [])
         self.decisions: List[PolicyDecision] = []
+        self.obligations: List[Obligation] = []
+        self._obligation_seq = 0
+
+    def _check_obligations(self, decision: PolicyDecision) -> List[Obligation]:
+        """
+        Run every obligation_rule against a just-rendered decision, creating
+        a pending Obligation for each one that names a duty. Empty
+        `obligation_rules` (the default) means this never creates anything
+        -- zero behavior change for any caller who doesn't opt in.
+        """
+        created: List[Obligation] = []
+        for name, rule in self.obligation_rules:
+            description = rule(decision)
+            if description is None:
+                continue
+            self._obligation_seq += 1
+            obligation = Obligation(
+                obligation_id=f"obl_{self._obligation_seq:04d}",
+                description=description, rule_name=name, decision=decision)
+            self.obligations.append(obligation)
+            created.append(obligation)
+        return created
 
     def authorize(self, action: ProposedAction) -> PolicyDecision:
         escalation: Optional[PolicyDecision] = None
+        fired: List[Tuple[str, str, str]] = []
         for name, rule in self.rules:
             outcome = rule(action)
             if outcome is None:
                 continue
             verdict, reason = outcome
-            decision = PolicyDecision(verdict=verdict, reason=reason, rule_name=name, action=action)
+            fired.append((name, verdict.value, reason))
+            decision = PolicyDecision(verdict=verdict, reason=reason, rule_name=name,
+                                      action=action, all_rule_verdicts=list(fired))
             if verdict == PolicyVerdict.BLOCKED:
                 self.decisions.append(decision)
+                self._check_obligations(decision)
                 return decision
             if verdict == PolicyVerdict.ESCALATED and escalation is None:
                 escalation = decision
@@ -162,7 +254,9 @@ class ActionPolicy:
         final = escalation or PolicyDecision(
             verdict=PolicyVerdict.ALLOWED, reason="no policy rule objected",
             rule_name="default", action=action)
+        final.all_rule_verdicts = list(fired)
         self.decisions.append(final)
+        self._check_obligations(final)
         return final
 
     def authorize_outcome(self, action: ProposedAction, outcome: ExecutionOutcome) -> PolicyDecision:
@@ -179,14 +273,18 @@ class ActionPolicy:
         post-execution, not two separate ledgers.
         """
         escalation: Optional[PolicyDecision] = None
+        fired: List[Tuple[str, str, str]] = []
         for name, rule in self.post_execution_rules:
             result = rule(action, outcome)
             if result is None:
                 continue
             verdict, reason = result
-            decision = PolicyDecision(verdict=verdict, reason=reason, rule_name=name, action=action)
+            fired.append((name, verdict.value, reason))
+            decision = PolicyDecision(verdict=verdict, reason=reason, rule_name=name,
+                                      action=action, all_rule_verdicts=list(fired))
             if verdict == PolicyVerdict.BLOCKED:
                 self.decisions.append(decision)
+                self._check_obligations(decision)
                 return decision
             if verdict == PolicyVerdict.ESCALATED and escalation is None:
                 escalation = decision
@@ -194,7 +292,9 @@ class ActionPolicy:
         final = escalation or PolicyDecision(
             verdict=PolicyVerdict.ALLOWED, reason="no post-execution policy rule objected",
             rule_name="default", action=action)
+        final.all_rule_verdicts = list(fired)
         self.decisions.append(final)
+        self._check_obligations(final)
         return final
 
     def report(self) -> Dict[str, Any]:
@@ -242,6 +342,76 @@ def max_results_ceiling(ceiling: int) -> Tuple[str, PolicyRule]:
                     f"max_results {action.max_results} exceeds policy ceiling {ceiling}")
         return None
     return "max_results_ceiling", rule
+
+
+# ============================================================================
+# BUILT-IN OBLIGATION RULE CONSTRUCTORS
+# ============================================================================
+
+def notify_on_verdict(verdicts: Set[PolicyVerdict], description: str) -> Tuple[str, ObligationRule]:
+    """
+    Create a standing notify/log obligation whenever a rendered decision's
+    verdict is one of `verdicts` -- e.g. "every BLOCKED conflicts action
+    must be reported to the paper's owning team within one business day."
+    The obligation is a fact to be fulfilled or explicitly dispensed later
+    (see `fulfill_obligation`/`dispense_obligation`); creating it here never
+    blocks or alters the decision it's attached to.
+    """
+    def rule(decision: PolicyDecision) -> Optional[str]:
+        if decision.verdict in verdicts:
+            return description
+        return None
+    return "notify_on_verdict", rule
+
+
+# ============================================================================
+# OBLIGATION LIFECYCLE (fulfill or dispense -- never a silent drop)
+# ============================================================================
+
+def _find_obligation(policy: ActionPolicy, obligation_id: str) -> Obligation:
+    for o in policy.obligations:
+        if o.obligation_id == obligation_id:
+            return o
+    raise KeyError(f"no such obligation: {obligation_id!r}")
+
+
+def fulfill_obligation(policy: ActionPolicy, obligation_id: str, evidence: str = "") -> Obligation:
+    """Mark a pending obligation fulfilled -- someone did the required thing.
+    Raises if the obligation is already resolved (fulfilled or dispensed) --
+    resolution happens exactly once, not overwritten."""
+    obligation = _find_obligation(policy, obligation_id)
+    if obligation.status != "pending":
+        raise ValueError(f"obligation {obligation_id!r} is already {obligation.status!r}")
+    obligation.status = "fulfilled"
+    obligation.resolved_at = _now()
+    obligation.resolution_note = evidence
+    return obligation
+
+
+def dispense_obligation(
+    policy: ActionPolicy, obligation_id: str, dispensed_by: str, reason: str,
+) -> Obligation:
+    """
+    A human explicitly waives a pending obligation, on the record -- never
+    a silent drop. Distinct from fulfillment: the duty was never carried
+    out, but a human decided, with a named reason, that it doesn't need to
+    be -- the same "waiver, not silence" discipline `WorkflowGate`'s
+    ALLOWED_BY_WAIVER already applies to gate decisions, applied here to
+    obligations instead.
+    """
+    obligation = _find_obligation(policy, obligation_id)
+    if obligation.status != "pending":
+        raise ValueError(f"obligation {obligation_id!r} is already {obligation.status!r}")
+    obligation.status = "dispensed"
+    obligation.resolved_at = _now()
+    obligation.resolved_by = dispensed_by
+    obligation.resolution_note = reason
+    return obligation
+
+
+def pending_obligations(policy: ActionPolicy) -> List[Obligation]:
+    """Every obligation this policy has created that's neither fulfilled nor dispensed yet."""
+    return [o for o in policy.obligations if o.status == "pending"]
 
 
 # ============================================================================

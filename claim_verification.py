@@ -242,3 +242,68 @@ def atomic_entailment_report(node: Any, graph: Any = None, threshold: float = 0.
         "weakest_score": min(scores) if scores else None,
         "entailed": bool(scores) and min(scores) >= bar,
     }
+
+
+# ============================================================================
+# MULTI-SIGNAL GRADED CONFIDENCE
+#
+# word_overlap_score/atomic entailment above are each a single signal --
+# one whole-claim bag-of-words score, or one weakest-clause score. "Beyond
+# Logprobs" (2026) argues a single confidence signal in a high-stakes
+# extraction pipeline is insufficient -- a claim can clear one signal's bar
+# on incidental vocabulary overlap while a more targeted signal would catch
+# it. SEVA (2026) separately argues verifiers should expose graded,
+# process-level detail instead of an opaque binary pass/fail.
+# multi_signal_confidence() combines the two signals this module already
+# computes into one graded report; multi_signal_entailment_checker()
+# requires BOTH to independently clear the bar, not either one alone --
+# still a drop-in Callable[[Node, Graph], bool] for
+# WorkflowGate(entailment_checker=...), same as the other two checkers.
+#
+# Purely additive: word_overlap_score/keyword_overlap_entailment_checker/
+# atomic_entailment_checker/atomic_entailment_report above are completely
+# unmodified.
+# ============================================================================
+
+def multi_signal_confidence(node: Any, graph: Any = None, threshold: float = 0.15,
+                            atom_threshold: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Graded, per-signal detail combining the whole-claim bag-of-words score
+    (`word_overlap_score`) and the weakest-atom score (`_atom_scores`'
+    minimum) -- the same two signals this module already computes
+    separately, reported together instead of collapsed into one checker's
+    single bool. `signals_agree` is `False` whenever the two signals land
+    on opposite sides of their own threshold -- a claim that passes on one
+    signal but not the other is exactly the "silently wrong on one signal"
+    case a single-signal checker can't see.
+    """
+    bar = threshold if atom_threshold is None else atom_threshold
+    bag_score = word_overlap_score(node, graph)
+    atom_scores = _atom_scores(node, graph)
+    weakest_atom_score = min(atom_scores) if atom_scores else None
+
+    bag_passes = bag_score >= threshold
+    atom_passes = weakest_atom_score is not None and weakest_atom_score >= bar
+
+    return {
+        "bag_overlap_score": bag_score,
+        "weakest_atom_score": weakest_atom_score,
+        "bag_signal_passes": bag_passes,
+        "atom_signal_passes": atom_passes,
+        "signals_agree": bag_passes == atom_passes,
+        "entailed": bag_passes and atom_passes,
+    }
+
+
+def multi_signal_entailment_checker(node: Any, graph: Any = None, threshold: float = 0.15,
+                                    atom_threshold: Optional[float] = None) -> bool:
+    """
+    Same `Callable[[Node, Graph], bool]` contract as
+    `keyword_overlap_entailment_checker`/`atomic_entailment_checker` --
+    drop-in for `WorkflowGate(entailment_checker=...)`. Requires BOTH the
+    whole-claim bag-of-words signal AND the weakest-atom signal to
+    independently pass, not just one -- a single signal that happens to
+    clear the bar on incidental vocabulary overlap can't pass on its own
+    strength alone; both must agree the claim is supported.
+    """
+    return multi_signal_confidence(node, graph, threshold, atom_threshold)["entailed"]

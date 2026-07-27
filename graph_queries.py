@@ -8,7 +8,7 @@ call directly, instead of parsing report text. Every function here takes a
 ResearchGraph (plus an optional WorkflowGate where a live decision is needed)
 and returns nodes/edges/decisions -- never text, never a mutation.
 
-Seven questions an agent actually needs to ask:
+Eight questions an agent actually needs to ask:
   get_node              -- "what is this id"
   claims_for_paper       -- "what did this paper produce"
   neighbors              -- "what connects to this node, and how"
@@ -17,6 +17,9 @@ Seven questions an agent actually needs to ask:
   blocked_jobs/why_blocked -- "what's stuck, and why" (re-runs the real gate)
   search                 -- "find nodes whose text mentions X"
   detect_job_dependency_cycles -- "will this job graph deadlock" (BLOCKED_BY cycles)
+  attributed_positions_for -- "what does each source actually say about this
+                              subject/object" -- every claim shown as its own
+                              attributed position, not collapsed into one value
 """
 
 from typing import Any, Dict, List, Optional
@@ -103,6 +106,43 @@ def contradicting_claims(graph: ResearchGraph, claim_id: str, include_resolved: 
         elif c.target_claim_id == claim_id:
             other_ids.add(c.source_claim_id)
     return [idx[i] for i in other_ids if i in idx]
+
+
+def attributed_positions_for(graph: ResearchGraph, subject: str, object: str) -> List[Dict[str, Any]]:
+    """
+    Every claim node sharing this exact (subject, object) pair, each
+    returned as its own attributed position -- text, relation,
+    source_paper, and confidence -- rather than collapsed into one
+    resolved value. "Provenance-Enhanced Statements in Knowledge Graphs"
+    (2026) argues attribution should be a first-class, coexisting relation
+    ("according to source A, phi") rather than forcing differently-worded
+    or conflicting claims about the same subject/object into a single
+    truth value.
+
+    This needs no schema change: every claim node already carries its own
+    `Provenance.source_paper`, so multiple attributed positions on one
+    subject/object already coexist as distinct nodes today -- this query
+    just surfaces them side by side instead of requiring a caller to
+    notice a `ConflictEdge` exists first. Positions may agree, disagree,
+    or simply differ in relation; this makes no judgment about that --
+    `contradicting_claims`/`detect_conflicts_in_graph` already do.
+    """
+    out: List[Dict[str, Any]] = []
+    for n in graph.nodes:
+        if n.type != NodeType.CLAIM.value:
+            continue
+        props = n.properties or {}
+        if props.get("subject") != subject or props.get("object") != object:
+            continue
+        prov = n.provenance
+        out.append({
+            "claim_id": n.id,
+            "text": props.get("text", ""),
+            "relation": props.get("relation"),
+            "source_paper": prov.source_paper if prov else None,
+            "confidence": prov.confidence if prov else None,
+        })
+    return out
 
 
 def why_blocked(

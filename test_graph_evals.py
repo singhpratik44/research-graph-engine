@@ -10,8 +10,10 @@ import unittest
 
 import golden_fixtures as gf
 import graph_evals as evals
+import graph_memory as memory
+import literature_corpus as corpus
 import research_graph_gates as gates
-from research_graph_schema import ExtractionType
+from research_graph_schema import ExtractionType, MemoryKind, Node, NodeType, ResearchGraph
 
 
 class TestRunAll(unittest.TestCase):
@@ -19,9 +21,10 @@ class TestRunAll(unittest.TestCase):
         report = evals.run_all()
         self.assertTrue(report.all_passed, [f"{r.name}: {r.detail}" for r in report.failures()])
 
-    def test_report_has_all_four_categories(self):
+    def test_report_has_all_six_categories(self):
         report = evals.run_all()
-        for category in ("query", "gate_audit", "extraction", "regression"):
+        for category in ("query", "gate_audit", "extraction", "regression",
+                         "construction_quality", "memory_effectiveness"):
             self.assertTrue(report.by_category(category), f"no cases in {category!r}")
 
     def test_render_report_mentions_pass_count(self):
@@ -106,6 +109,85 @@ class TestExtractionChecks(unittest.TestCase):
         case = evals.EXTRACTION_CHECKS[1]
         result = evals.run_extraction_check(case)
         self.assertTrue(result.passed)
+
+
+class TestConstructionQualityMetrics(unittest.TestCase):
+    def test_claim_field_completeness_full_on_the_fixture_graph(self):
+        self.assertEqual(evals.claim_field_completeness(gf.build_fixture_graph()), 1.0)
+
+    def test_claim_field_completeness_vacuously_full_with_no_claims(self):
+        self.assertEqual(evals.claim_field_completeness(ResearchGraph()), 1.0)
+
+    def test_claim_field_completeness_catches_a_real_defect(self):
+        graph = gf.build_fixture_graph()
+        broken = Node("claim_broken", NodeType.CLAIM.value, "x",
+                      properties={"text": "incomplete"})  # no subject/relation/object
+        graph.nodes.append(broken)
+        self.assertLess(evals.claim_field_completeness(graph), 1.0)
+
+    def test_duplicate_text_ratio_zero_on_the_corpus(self):
+        self.assertEqual(evals.duplicate_text_ratio(corpus.build_corpus_graph()), 0.0)
+
+    def test_duplicate_text_ratio_catches_a_real_duplicate(self):
+        graph = gf.build_fixture_graph()
+        original = next(n for n in graph.nodes if n.type == NodeType.CLAIM.value)
+        dup = Node("claim_dup", NodeType.CLAIM.value, "x",
+                  properties={"text": original.properties["text"]})
+        graph.nodes.append(dup)
+        self.assertGreater(evals.duplicate_text_ratio(graph), 0.0)
+
+    def test_orphaned_node_ratio_zero_on_the_corpus(self):
+        self.assertEqual(evals.orphaned_node_ratio(corpus.build_corpus_graph()), 0.0)
+
+    def test_orphaned_node_ratio_catches_a_real_orphan(self):
+        graph = gf.build_fixture_graph()
+        graph.nodes.append(Node("orphan_node", NodeType.CONCEPT.value, "x",
+                                properties={"text": "unconnected"}))
+        self.assertGreater(evals.orphaned_node_ratio(graph), 0.0)
+
+    def test_run_construction_quality_checks_all_pass_today(self):
+        results = evals.run_construction_quality_checks()
+        self.assertTrue(all(r.passed for r in results), [r.detail for r in results])
+
+    def test_a_wrong_expectation_is_caught_as_a_failure(self):
+        bad_case = evals.GraphMetricCase(
+            "deliberately wrong expectation", gf.build_fixture_graph,
+            evals.claim_field_completeness, 0.0)
+        result = evals.run_graph_metric_case(bad_case, "construction_quality")
+        self.assertFalse(result.passed)
+
+    def test_a_raising_metric_is_a_failure_not_a_crash(self):
+        bad_case = evals.GraphMetricCase(
+            "deliberately broken", gf.build_fixture_graph,
+            lambda g: (_ for _ in ()).throw(RuntimeError("boom")), 1.0)
+        result = evals.run_graph_metric_case(bad_case, "construction_quality")
+        self.assertFalse(result.passed)
+        self.assertIn("raised", result.detail)
+
+
+class TestMemoryEffectivenessMetric(unittest.TestCase):
+    def test_vacuously_effective_with_no_repair_patterns(self):
+        self.assertEqual(evals.repair_pattern_effectiveness(gf.build_fixture_graph()), 1.0)
+
+    def test_effective_when_after_node_resolves(self):
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001")
+        self.assertEqual(evals.repair_pattern_effectiveness(graph), 1.0)
+
+    def test_catches_an_orphaned_repair_pattern(self):
+        """A repair pattern whose after_node no longer resolves (e.g. it was
+        somehow removed) must drag the effectiveness score down, not be
+        silently ignored."""
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001")
+        graph.nodes = [n for n in graph.nodes if n.id != "job_2606_claims_001"]
+        self.assertLess(evals.repair_pattern_effectiveness(graph), 1.0)
+
+    def test_run_memory_effectiveness_checks_all_pass_today(self):
+        results = evals.run_memory_effectiveness_checks()
+        self.assertTrue(all(r.passed for r in results), [r.detail for r in results])
 
 
 if __name__ == "__main__":

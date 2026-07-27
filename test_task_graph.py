@@ -41,6 +41,67 @@ class TestTaskDAGConstruction(unittest.TestCase):
         self.assertEqual(dag.dependencies_of("a"), [])
 
 
+class TestDetectHazards(unittest.TestCase):
+    def test_clean_connected_dag_has_no_hazards(self):
+        dag = TaskDAG()
+        dag.add_task("a", "Task A")
+        dag.add_task("b", "Task B", parent_task_id="a")
+        dag.add_dependency("b", depends_on="a")
+        self.assertEqual(dag.detect_hazards(), [])
+
+    def test_single_task_dag_is_never_flagged_as_an_island(self):
+        dag = TaskDAG()
+        dag.add_task("solo", "Solo Task")
+        self.assertEqual(dag.detect_hazards(), [])
+
+    def test_dangling_parent_task_id_is_flagged(self):
+        dag = TaskDAG()
+        dag.add_task("a", "Task A", parent_task_id="ghost")
+        dag.add_task("b", "Task B")
+        dag.add_dependency("b", depends_on="a")
+        hazards = dag.detect_hazards()
+        self.assertEqual(len(hazards), 1)
+        self.assertIn("a", hazards[0])
+        self.assertIn("ghost", hazards[0])
+
+    def test_real_parent_task_id_is_not_flagged(self):
+        dag = TaskDAG()
+        dag.add_task("parent", "Parent")
+        dag.add_task("child", "Child", parent_task_id="parent")
+        dag.add_task("other", "Other")
+        dag.add_dependency("child", depends_on="parent")
+        dag.add_dependency("other", depends_on="parent")
+        self.assertEqual(dag.detect_hazards(), [])
+
+    def test_island_task_with_no_edges_is_flagged(self):
+        dag = TaskDAG()
+        dag.add_task("a", "Task A")
+        dag.add_task("b", "Task B")
+        dag.add_task("island", "Forgotten Task")
+        dag.add_dependency("b", depends_on="a")
+        hazards = dag.detect_hazards()
+        self.assertEqual(len(hazards), 1)
+        self.assertIn("island", hazards[0])
+
+    def test_both_hazard_kinds_reported_together(self):
+        dag = TaskDAG()
+        dag.add_task("a", "Task A", parent_task_id="ghost")
+        dag.add_task("b", "Task B")
+        dag.add_task("island", "Forgotten Task")
+        dag.add_dependency("b", depends_on="a")
+        hazards = dag.detect_hazards()
+        self.assertEqual(len(hazards), 2)
+
+    def test_hazards_are_pure_and_do_not_mutate_the_dag(self):
+        dag = TaskDAG()
+        dag.add_task("a", "Task A", parent_task_id="ghost")
+        before_nodes = dict(dag.nodes)
+        before_edges = list(dag.edges)
+        dag.detect_hazards()
+        self.assertEqual(dag.nodes, before_nodes)
+        self.assertEqual(dag.edges, before_edges)
+
+
 class TestReadyTasks(unittest.TestCase):
     def test_task_with_no_deps_is_ready_immediately(self):
         dag = TaskDAG()

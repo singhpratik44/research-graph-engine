@@ -319,6 +319,79 @@ moves to the next item after `make validate` is green and a human has merged.
 
   Full suite: 568 tests passing; `make typecheck` clean across all 43
   modules.
+- **Eight literature-informed improvements, one full pass** (ad hoc, not
+  part of the sequenced roadmap — a research pass across robustness,
+  graph theory, and agentic architecture, scoped against everything
+  already built, surfaced all eight below; unlike the Tier-1-only rounds
+  above, this pass was built in full — Tier 2/3 candidates included, each
+  with its evidentiary strength stated honestly at the time it was
+  proposed). All purely additive.
+  - **Obligation/dispensation + meta-policy conflict visibility**
+    (`action_policy.py`'s `Obligation`/`notify_on_verdict`/
+    `fulfill_obligation`/`dispense_obligation`/`pending_obligations`;
+    `PolicyDecision.all_rule_verdicts`/`has_conflicting_rules`).
+    AgenticRei (arXiv 2606.19464) names obligation-lifecycle management
+    and governed dispensations as primitives ALLOWED/ESCALATED/BLOCKED
+    alone can't represent. Every rule that fires on an action is now
+    recorded, not just the one precedence picks, so a genuine conflict
+    between rules (one would escalate, another would block) is a visible
+    fact, not a silently-applied precedence order.
+  - **Trace-level (whole-trajectory) trust** (`graph_memory
+    .full_trajectory_for`/`trajectory_trust_score`). Two independent 2026
+    papers ("From Agent Traces to Trust"; "AgentTrails") find trust
+    judgments stopping at one claim-to-source hop miss most of an agent's
+    real execution trace. Aggregates TASK_OUTCOME, CONFIDENCE_DIVERGENCE,
+    ACTION_POLICY_DECISION, and REVIEWER_DISAGREEMENT records reachable
+    by following subject_ref chains multiple hops deep into one weighted
+    score, distinct from `specialist_trust_scores`/`provenance_weighted
+    _trust_scores`'s one-hop, disagreement-only view (neither changed).
+  - **Attributed-statement query view** (`graph_queries
+    .attributed_positions_for`). "Provenance-Enhanced Statements in
+    Knowledge Graphs" argues attribution should be a first-class,
+    coexisting relation rather than forcing differently-worded or
+    conflicting claims about the same subject/object into one value. No
+    schema change needed — every claim already carries its own
+    `Provenance.source_paper`; this is a pure, read-only query surfacing
+    what already coexists in the graph.
+  - **Corpus-level construction-quality checks** (`graph_evals
+    .claim_field_completeness`/`duplicate_text_ratio`/
+    `orphaned_node_ratio`, wired into `run_all()` as a new
+    `CONSTRUCTION_QUALITY` category). KGCQual (2026) argues systemic
+    extraction-pipeline issues are a corpus-level signal that per-node
+    schema validation can't surface on its own.
+  - **Static hazard detection for `TaskDAG`** (`task_graph.TaskDAG
+    .detect_hazards`). AgentFlow (2026) performs static analysis of agent
+    program dependency graphs before execution; applied here to a
+    dangling `parent_task_id` and disconnected ("island") tasks — neither
+    stops a `Scheduler` run on its own, so nothing else would ever catch
+    them. Flagged at proposal as a partial stretch (AgentFlow analyzes
+    program code, `TaskDAG` is a runtime data structure) — the general
+    discipline transferred, not the specific machinery.
+  - **Bi-temporal `valid_from` on retraction** (`graph_memory
+    .retract_memory_record`'s new optional param). A bi-temporal
+    graph-management paper argues systems conflate "when we found out"
+    (`recorded_at`, already stamped on every record) with "when it
+    stopped being true" — two different questions. `valid_from` lets a
+    caller state the latter explicitly; omitting it changes nothing.
+  - **Multi-signal graded confidence** (`claim_verification
+    .multi_signal_confidence`/`multi_signal_entailment_checker`). "Beyond
+    Logprobs" and SEVA (both 2026) argue a single confidence signal is
+    insufficient in a high-stakes pipeline. Combines the existing
+    whole-claim bag-of-words score and weakest-atom score into one graded
+    report, requiring both to independently agree — same drop-in
+    `Callable[[Node, Graph], bool]` contract as the other two checkers,
+    neither of which is modified.
+  - **Repair-pattern effectiveness check** (`graph_evals
+    .repair_pattern_effectiveness`, wired into `run_all()` as a new
+    `MEMORY_EFFECTIVENESS` category). LongMemEval-V2 (ICML 2026 SCALE
+    workshop) asks whether accumulated agent memory actually helps, not
+    just whether it's well-formed. Thin evidence (one workshop paper) —
+    a narrow, honest proxy (does a recorded repair's `after_node` still
+    resolve to something reusable), not a general claim that "memory
+    helps."
+
+  Full suite: 634 tests passing; `make typecheck` clean across all 43
+  modules.
 
 ## Next
 

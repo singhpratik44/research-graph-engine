@@ -579,6 +579,24 @@ class TestRetractMemoryRecord(unittest.TestCase):
         mem.retract_memory_record(g, record.id, "carol", "reason")
         self.assertEqual(record.properties, original_props)
 
+    def test_valid_from_defaults_to_absent_not_a_none_placeholder(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        retraction = mem.retract_memory_record(g, record.id, "carol", "reason")
+        self.assertNotIn("valid_from", retraction.properties["details"])
+
+    def test_valid_from_is_recorded_separately_from_recorded_at(self):
+        """Bi-temporal distinction: valid_from (when the fact stopped being
+        true) is not the same as recorded_at (when we recorded that)."""
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        retraction = mem.retract_memory_record(
+            g, record.id, "carol", "reason", valid_from="2026-07-20T00:00:00+00:00")
+        self.assertEqual(retraction.properties["details"]["valid_from"],
+                         "2026-07-20T00:00:00+00:00")
+        self.assertNotEqual(retraction.properties["details"]["valid_from"],
+                            retraction.properties["recorded_at"])
+
 
 class TestIsRetracted(unittest.TestCase):
     def test_false_before_retraction(self):
@@ -625,6 +643,120 @@ class TestRetractionExcludedFromTrustScores(unittest.TestCase):
         mem.retract_memory_record(g, record.id, "carol", "source later found poisoned")
         self.assertNotIn("schema_validator", mem.specialist_trust_scores(g))
         self.assertNotIn("schema_validator", mem.provenance_weighted_trust_scores(g))
+
+
+# ===========================================================================
+# full_trajectory_for / trajectory_trust_score
+# ===========================================================================
+
+class TestFullTrajectoryFor(unittest.TestCase):
+    def test_empty_when_nothing_recorded(self):
+        g = _graph()
+        self.assertEqual(mem.full_trajectory_for(g, "job_2606_claims_001"), [])
+
+    def test_one_hop_matches_memory_records_for(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        trajectory = mem.full_trajectory_for(g, "job_2606_claims_001")
+        self.assertEqual([n.id for n in trajectory], [record.id])
+
+    def test_second_hop_includes_a_record_about_a_record(self):
+        """A retraction's subject_ref is the disagreement's own id, not the
+        job's -- memory_records_for(graph, job_id) alone would miss it, but
+        the full multi-hop trajectory must not."""
+        g = _graph()
+        disagreement = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept",
+                                                "bob", "reject")
+        retraction = mem.retract_memory_record(g, disagreement.id, "carol", "reason")
+        one_hop = {n.id for n in mem.memory_records_for(g, "job_2606_claims_001")}
+        self.assertEqual(one_hop, {disagreement.id})
+        trajectory = {n.id for n in mem.full_trajectory_for(g, "job_2606_claims_001")}
+        self.assertEqual(trajectory, {disagreement.id, retraction.id})
+
+    def test_deduplicates_by_node_id(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        trajectory = mem.full_trajectory_for(g, "job_2606_claims_001")
+        ids = [n.id for n in trajectory]
+        self.assertEqual(len(ids), len(set(ids)))
+
+
+class TestTrajectoryTrustScore(unittest.TestCase):
+    def test_none_when_no_signal_bearing_records(self):
+        g = _graph()
+        self.assertIsNone(mem.trajectory_trust_score(g, "job_2606_claims_001"))
+
+    def test_disagreement_with_one_matching_verdict_scores_half(self):
+        # job_2606_claims_001 status is "completed" -> side "pass".
+        # Only verdict_a ("pass") matches; verdict_b ("fail") doesn't.
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 0.5)
+
+    def test_disagreement_with_both_verdicts_matching_scores_full_trust(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="pass")
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 1.0)
+
+    def test_confidence_divergence_contributes_a_signal(self):
+        g = _graph()
+        mem.record_confidence_divergence(g, "job_2606_claims_001", 0.5, 0.6)
+        # gap=0.1 -> signal=0.9
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 0.9)
+
+    def test_action_policy_decision_contributes_a_signal(self):
+        g = _graph()
+        action = ap.ProposedAction("paper_x", ExtractionType.CLAIMS)
+        decision = ap.PolicyDecision(verdict=ap.PolicyVerdict.ALLOWED, reason="ok",
+                                     rule_name="default", action=action)
+        mem.record_action_policy_decision(g, "job_2606_claims_001", decision)
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 1.0)
+
+    def test_blocked_action_policy_decision_scores_zero(self):
+        g = _graph()
+        action = ap.ProposedAction("paper_x", ExtractionType.CLAIMS)
+        decision = ap.PolicyDecision(verdict=ap.PolicyVerdict.BLOCKED, reason="no",
+                                     rule_name="deny", action=action)
+        mem.record_action_policy_decision(g, "job_2606_claims_001", decision)
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 0.0)
+
+    def test_task_outcome_contributes_a_signal(self):
+        g = _graph()
+        span = TaskSpan(task_id="job_2606_claims_001", agent_id="claim_extractor",
+                        parent_task_id=None, status="completed", confidence=0.9,
+                        started_at="t0", ended_at="t1")
+        mem.record_task_outcome(g, span)
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 1.0)
+
+    def test_retracted_record_is_excluded_from_the_score(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001",
+                                         reviewer_a="schema_validator", verdict_a="pass",
+                                         reviewer_b="conflict_checker", verdict_b="pass")
+        mem.retract_memory_record(g, record.id, "carol", "reason")
+        self.assertIsNone(mem.trajectory_trust_score(g, "job_2606_claims_001"))
+
+    def test_undecided_outcome_gives_no_disagreement_signal(self):
+        # job_2606_concepts_001's status is "held" -- not decided.
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_concepts_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        self.assertIsNone(mem.trajectory_trust_score(g, "job_2606_concepts_001"))
+
+    def test_multiple_signal_kinds_are_weighted_together(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="pass")  # signal 1.0
+        mem.record_confidence_divergence(g, "job_2606_claims_001", 0.5, 0.6)  # signal 0.9
+        # Both records are about the same node (same provenance weight), so
+        # the aggregate is a plain average of the two signals.
+        self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 0.95)
 
 
 # ===========================================================================

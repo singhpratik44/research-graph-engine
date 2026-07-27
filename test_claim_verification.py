@@ -455,5 +455,116 @@ class TestAtomicCheckerPluggedIntoGate(unittest.TestCase):
         self.assertNotIn("confidence_above_threshold", checked_names)
 
 
+class TestMultiSignalConfidence(unittest.TestCase):
+    def test_well_supported_claim_passes_both_signals(self):
+        paper = _paper(
+            "paper_orch", "Hierarchical Orchestration for Multi-Agent Fleets",
+            extra_text="We show hierarchical orchestration reduces coordination "
+                       "overhead across large multi-agent fleets.",
+        )
+        claim = _claim(
+            "claim_orch", "paper_orch",
+            "Hierarchical orchestration reduces coordination overhead.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        graph = ResearchGraph(nodes=[paper, claim])
+        report = cv.multi_signal_confidence(claim, graph)
+        self.assertTrue(report["bag_signal_passes"])
+        self.assertTrue(report["atom_signal_passes"])
+        self.assertTrue(report["signals_agree"])
+        self.assertTrue(report["entailed"])
+
+    def test_unrelated_claim_fails_both_signals(self):
+        paper = _paper("paper_unrelated", "Photosynthesis in Alpine Lichen Species")
+        claim = _claim(
+            "claim_unrelated", "paper_unrelated",
+            "Distributed consensus protocols tolerate Byzantine failures.",
+            "distributed consensus", "tolerates", "Byzantine failures",
+        )
+        graph = ResearchGraph(nodes=[paper, claim])
+        report = cv.multi_signal_confidence(claim, graph)
+        self.assertFalse(report["bag_signal_passes"])
+        self.assertFalse(report["atom_signal_passes"])
+        self.assertTrue(report["signals_agree"])
+        self.assertFalse(report["entailed"])
+
+    def test_light_angle_case_still_caught_by_multi_signal(self):
+        graph = qih.build_stress_graph()
+        claim = graph.index()["claim_light_angle_derives_gr"]
+        self.assertFalse(cv.multi_signal_entailment_checker(claim, graph))
+
+    def test_a_compound_claim_with_one_weak_clause_disagrees_across_signals(self):
+        """The whole-claim bag can clear the bar on the well-supported half
+        while the weakest-atom signal catches the unsupported half -- the
+        exact 'silently wrong on one signal' case multi-signal scoring
+        exists to catch."""
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        graph = ResearchGraph(nodes=[paper, claim])
+        report = cv.multi_signal_confidence(claim, graph)
+        self.assertFalse(report["signals_agree"])
+        self.assertFalse(report["entailed"])
+
+    def test_claim_with_no_atoms_is_unsupported_not_vacuously_true(self):
+        claim = Node("claim_empty", NodeType.CLAIM.value, "x",
+                     provenance=Provenance("paper_x", ExtractionMethod.STRUCTURED_LLM.value,
+                                          0.9, datetime.now().isoformat()),
+                     properties={"text": ""})
+        report = cv.multi_signal_confidence(claim, ResearchGraph())
+        self.assertIsNone(report["weakest_atom_score"])
+        self.assertFalse(report["atom_signal_passes"])
+        self.assertFalse(report["entailed"])
+
+    def test_custom_threshold_can_flip_the_verdict(self):
+        paper = _paper(
+            "paper_orch", "Hierarchical Orchestration for Multi-Agent Fleets",
+            extra_text="We show hierarchical orchestration reduces coordination "
+                       "overhead across large multi-agent fleets.",
+        )
+        claim = _claim(
+            "claim_orch", "paper_orch",
+            "Hierarchical orchestration reduces coordination overhead.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+        )
+        graph = ResearchGraph(nodes=[paper, claim])
+        # low enough bar that both signals pass
+        self.assertTrue(cv.multi_signal_entailment_checker(claim, graph, threshold=0.01))
+        # a bar neither signal (both scoring a perfect 1.0 here) can clear
+        self.assertFalse(cv.multi_signal_entailment_checker(claim, graph, threshold=1.01))
+
+    def test_checker_is_a_pure_function_of_the_report(self):
+        paper = _paper("paper_x", "Hierarchical orchestration overhead study")
+        claim = _claim("claim_x", "paper_x", "Hierarchical orchestration reduces overhead.",
+                       "hierarchical orchestration", "reduces", "overhead")
+        graph = ResearchGraph(nodes=[paper, claim])
+        checker_result = cv.multi_signal_entailment_checker(claim, graph)
+        report_result = cv.multi_signal_confidence(claim, graph)["entailed"]
+        self.assertEqual(checker_result, report_result)
+
+
+class TestMultiSignalCheckerPluggedIntoGate(unittest.TestCase):
+    def test_configured_gate_catches_the_compound_claim(self):
+        paper = _paper("paper_x", "Hierarchical Orchestration Reduces Coordination "
+                                  "Overhead In Distributed Systems")
+        claim = _claim(
+            "claim_x", "paper_x",
+            "Hierarchical orchestration reduces coordination overhead in distributed "
+            "systems, and quantum entanglement explains dark matter halos in spiral galaxies.",
+            "hierarchical orchestration", "reduces", "coordination overhead",
+            conf=0.9,
+        )
+        g = ResearchGraph(nodes=[paper, claim])
+        gate = gates.WorkflowGate(entailment_checker=cv.multi_signal_entailment_checker)
+        decision = gate.should_unlock_next_stage(claim, g)
+        self.assertFalse(decision.can_proceed)
+        self.assertEqual(decision.reason_code, gates.GateReasonCode.CLAIM_NOT_ENTAILED)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

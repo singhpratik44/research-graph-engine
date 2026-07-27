@@ -69,6 +69,19 @@ prior memory as a governed action, not a silent overwrite.
     append-only representation: retraction is itself a new MEMORY_RETRACTED
     record linked back to what it retracts, never a deletion or in-place
     edit of the original.
+
+One more piece, from a follow-up literature pass specifically on trust
+propagation: two independent 2026 papers ("From Agent Traces to Trust";
+"AgentTrails") find that trust judgments stopping at one claim-to-source
+hop miss most of an agent's real execution trace -- tool calls, memory
+writes, and inter-agent messages chained together.
+`full_trajectory_for`/`trajectory_trust_score` aggregate a trust signal
+across the WHOLE reachable memory trajectory for a subject (every
+TASK_OUTCOME, CONFIDENCE_DIVERGENCE, ACTION_POLICY_DECISION, and
+REVIEWER_DISAGREEMENT record reachable by following subject_ref chains
+multiple hops deep), instead of the one-hop, disagreement-only view
+`specialist_trust_scores`/`provenance_weighted_trust_scores` already give.
+Purely additive; neither of those two functions is changed.
 """
 
 import hashlib
@@ -699,6 +712,7 @@ def retract_memory_record(
     record_id: str,
     retracted_by: str,
     reason: str,
+    valid_from: Optional[str] = None,
 ) -> Node:
     """
     Governed retraction of a prior memory record -- "Forget & Rollback,"
@@ -710,6 +724,17 @@ def retract_memory_record(
     append-only discipline everywhere else. The retracted record's node
     still exists and is still directly queryable; `is_retracted`/
     `active_memory_records_for` are how a caller learns to discount it.
+
+    `valid_from` (default `None`): a separate, bi-temporal 2026 paper (on
+    agent-native bi-temporal graph management) argues systems that only
+    record "when we found out" (`recorded_at`, which `_memory_node` already
+    stamps on every record) conflate that with "when it stopped being
+    true" -- two different questions a single timestamp can't answer.
+    `valid_from` lets a caller state the latter explicitly (e.g. "this
+    stopped being valid last Tuesday, we just noticed it today"); omitting
+    it (the default) leaves this exactly as before -- `details` simply
+    doesn't gain a `valid_from` key, not a `None` placeholder standing in
+    for a real timestamp.
     """
     record = graph.index().get(record_id)
     if record is None:
@@ -718,6 +743,10 @@ def retract_memory_record(
         raise ValueError(f"{record_id!r} is not a memory record (type={record.type!r})")
 
     summary = f"{record_id} retracted by {retracted_by}: {reason}"
+    details: Dict[str, Any] = {"record_id": record_id, "retracted_by": retracted_by,
+                               "reason": reason}
+    if valid_from is not None:
+        details["valid_from"] = valid_from
     node = _memory_node(
         kind=MemoryKind.MEMORY_RETRACTED,
         subject_ref=record_id,
@@ -726,7 +755,7 @@ def retract_memory_record(
         source_paper=record_id,
         human_reviewed=True,
         review_notes=reason,
-        details={"record_id": record_id, "retracted_by": retracted_by, "reason": reason},
+        details=details,
     )
     graph.nodes.append(node)
     graph.edges.append(Edge(source=node.id, target=record_id,
@@ -750,6 +779,107 @@ def is_retracted(graph: ResearchGraph, record_id: str) -> bool:
 def active_memory_records_for(graph: ResearchGraph, subject_ref: str) -> List[Node]:
     """Same as `memory_records_for`, minus any record that has since been retracted."""
     return [n for n in memory_records_for(graph, subject_ref) if not is_retracted(graph, n.id)]
+
+
+# ============================================================================
+# TRAJECTORY-LEVEL TRUST (whole execution trace, not one hop)
+# ============================================================================
+
+def full_trajectory_for(
+    graph: ResearchGraph, subject_ref: str, _seen: Optional[set] = None,
+) -> List[Node]:
+    """
+    Every memory record reachable from `subject_ref` by following
+    subject_ref chains multiple hops deep -- not just the records directly
+    about `subject_ref` (`memory_records_for`'s one-hop view), but also
+    records about THOSE records (e.g. a MEMORY_RETRACTED record about a
+    REVIEWER_DISAGREEMENT record about a job). Deduplicated by node id;
+    `_seen` is an internal recursion guard against cycles -- callers should
+    not pass it.
+    """
+    seen = _seen if _seen is not None else set()
+    if subject_ref in seen:
+        return []
+    seen.add(subject_ref)
+
+    direct = memory_records_for(graph, subject_ref)
+    collected: Dict[str, Node] = {r.id: r for r in direct}
+    for record in direct:
+        for nested in full_trajectory_for(graph, record.id, seen):
+            collected.setdefault(nested.id, nested)
+    return list(collected.values())
+
+
+_ACTION_POLICY_VERDICT_SIGNAL = {"allowed": 1.0, "escalated": 0.5, "blocked": 0.0}
+
+
+def trajectory_trust_score(graph: ResearchGraph, subject_ref: str) -> Optional[float]:
+    """
+    Aggregate a trust signal across the WHOLE reachable memory trajectory
+    for `subject_ref` -- not just REVIEWER_DISAGREEMENT records the way
+    `specialist_trust_scores`/`provenance_weighted_trust_scores` do, but
+    every signal-bearing memory kind along the trace together:
+    TASK_OUTCOME, CONFIDENCE_DIVERGENCE, ACTION_POLICY_DECISION, and
+    REVIEWER_DISAGREEMENT. Two independent 2026 papers converge on exactly
+    this gap: trust judgments that stop at a single claim-to-source link
+    miss most of an agent's real execution trace.
+
+    Each record contributes a signal in [0, 1], weighted by
+    `provenance_trust_weight_for` of whatever node it's actually about
+    (the conservative default when that doesn't resolve). Retracted
+    records and kinds with no clear pass/fail signal (BLOCKED_REASON,
+    REPAIR_PATTERN, MEMORY_RETRACTED itself) contribute nothing. Returns
+    `None` when nothing in the trajectory carries a usable signal -- never
+    a bare 0.0 standing in for "no data."
+    """
+    idx = graph.index()
+    weighted_sum = 0.0
+    total_weight = 0.0
+
+    for record in full_trajectory_for(graph, subject_ref):
+        if is_retracted(graph, record.id):
+            continue
+        kind = record.properties.get("memory_kind")
+        details = record.properties.get("details", {})
+        signal: Optional[float] = None
+        target_id: Optional[str] = None
+
+        if kind == MemoryKind.REVIEWER_DISAGREEMENT.value:
+            target_id = details.get("node_id")
+            side = _outcome_side_for(graph, target_id)
+            if side is not None:
+                matches = sum(1 for key in ("verdict_a", "verdict_b")
+                              if details.get(key) == side)
+                signal = matches / 2.0
+        elif kind == MemoryKind.CONFIDENCE_DIVERGENCE.value:
+            target_id = details.get("node_id")
+            dconf = details.get("derivation_confidence")
+            vconf = details.get("validation_confidence")
+            if dconf is not None and vconf is not None:
+                signal = max(0.0, 1.0 - abs(vconf - dconf))
+        elif kind == MemoryKind.ACTION_POLICY_DECISION.value:
+            target_id = record.properties.get("subject_ref")
+            signal = _ACTION_POLICY_VERDICT_SIGNAL.get(details.get("verdict"))
+        elif kind == MemoryKind.TASK_OUTCOME.value:
+            target_id = details.get("task_id")
+            status = details.get("status")
+            if status == "completed":
+                signal = 1.0
+            elif status == "failed":
+                signal = 0.0
+
+        if signal is None:
+            continue
+
+        target = idx.get(target_id) if target_id else None
+        weight = (provenance_trust_weight_for(target) if target is not None
+                  else _DEFAULT_PROVENANCE_TRUST_WEIGHT)
+        weighted_sum += signal * weight
+        total_weight += weight
+
+    if total_weight == 0.0:
+        return None
+    return round(weighted_sum / total_weight, 4)
 
 
 if __name__ == "__main__":
