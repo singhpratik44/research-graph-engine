@@ -1,8 +1,8 @@
 # Resume: Technical Lead, Software Technical Infrastructure
 ## Google — Quantum-Safe Infrastructure Integration
 
-**Name: [Your Name]**  
-**Email: [your.email@domain.com]** | **GitHub: github.com/[username]** | **LinkedIn: linkedin.com/in/[username]**
+**Name: Pratik Singh**  
+**Email: parry.s.2324@gmail.com** | **GitHub: github.com/singhpratik44**
 
 ---
 

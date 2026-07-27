@@ -84,10 +84,10 @@ I'm ready to discuss:
 Thank you for considering my application.
 
 Best regards,  
-[Your Name]  
-[Your Email]  
+Pratik Singh  
+parry.s.2324@gmail.com  
 [Your Phone]  
-GitHub: github.com/[username]/research-graph-engine
+GitHub: github.com/singhpratik44/research-graph-engine
 
 ---
 
