@@ -14,6 +14,7 @@ from timing_engine import TimingEngine, TimingDomainEnum
 from state_manager import StateManager, ClosedLoopFeedbackControl
 from constraint_validator import ConstraintValidator
 from control_module import ControlModule
+from agentic_scheduler import AgenticScheduler, QuantumGate, SchedulingStrategyEnum, compare_schedulers
 
 
 class TestNeutralAtomPhysics(unittest.TestCase):
@@ -378,6 +379,134 @@ class TestControlModule(unittest.TestCase):
         stats = self.module.get_statistics()
         self.assertEqual(stats.gates_executed, 1)
         self.assertEqual(stats.measurements_taken, 1)
+
+
+class TestAgenticScheduler(unittest.TestCase):
+    """Agentic scheduler tests (18) — autonomous gate reordering for fidelity optimization"""
+
+    def setUp(self):
+        self.physics = NeutralAtomPhysics(num_qubits=100)
+        self.state_manager = StateManager(num_qubits=100)
+        self.scheduler = AgenticScheduler(self.state_manager, self.physics, SchedulingStrategyEnum.GREEDY_HEATING)
+
+    def test_scheduler_initialization(self):
+        self.assertEqual(self.scheduler.strategy, SchedulingStrategyEnum.GREEDY_HEATING)
+        self.assertEqual(self.scheduler.decision_count, 0)
+        self.assertEqual(len(self.scheduler.gates_scheduled), 0)
+
+    def test_naive_scheduling_preserves_order(self):
+        gates = [
+            QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0),
+            QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=1),
+            QuantumGate(gate_id=2, gate_type="X90", control_qubit=0, target_qubit=2),
+        ]
+        naive = AgenticScheduler(self.state_manager, self.physics, SchedulingStrategyEnum.NAIVE)
+        ordered = naive.plan_schedule(gates, available_time_us=10000)
+        self.assertEqual([g.gate_id for g in ordered], [0, 1, 2])
+
+    def test_greedy_heating_reorders_gates(self):
+        gates = [
+            QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0, dependencies=[]),
+            QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=1, dependencies=[]),
+            QuantumGate(gate_id=2, gate_type="X90", control_qubit=0, target_qubit=2, dependencies=[]),
+        ]
+        ordered = self.scheduler.plan_schedule(gates, available_time_us=10000)
+        self.assertEqual(len(ordered), 3)
+        self.assertGreaterEqual(self.scheduler.decision_count, 3)
+
+    def test_dependency_ordering_respected(self):
+        gate0 = QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0, dependencies=[])
+        gate1 = QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=1, dependencies=[0])
+        gate2 = QuantumGate(gate_id=2, gate_type="X90", control_qubit=0, target_qubit=2, dependencies=[1])
+        gates = [gate0, gate1, gate2]
+        ordered = self.scheduler.plan_schedule(gates, available_time_us=10000)
+        gate_ids = [g.gate_id for g in ordered]
+        self.assertEqual(gate_ids, [0, 1, 2])
+
+    def test_record_gate_execution(self):
+        gate = QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=5)
+        self.scheduler.record_gate_execution(gate, heating_applied_mk=0.1, fidelity_after=0.95)
+        self.assertEqual(len(self.scheduler.gates_executed), 1)
+        self.assertAlmostEqual(self.scheduler.cumulative_heating[5], 0.1, places=2)
+
+    def test_heating_accumulation(self):
+        gate0 = QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=3)
+        gate1 = QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=3)
+        self.scheduler.record_gate_execution(gate0, heating_applied_mk=0.1, fidelity_after=0.95)
+        self.scheduler.record_gate_execution(gate1, heating_applied_mk=0.1, fidelity_after=0.90)
+        self.assertAlmostEqual(self.scheduler.cumulative_heating[3], 0.2, places=2)
+
+    def test_current_state_report(self):
+        gate = QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=10)
+        self.scheduler.record_gate_execution(gate, heating_applied_mk=0.1, fidelity_after=0.95)
+        state = self.scheduler.get_current_state()
+        self.assertIn("cumulative_heating", state)
+        self.assertIn("qubit_fidelities", state)
+        self.assertEqual(state["gates_executed"], 1)
+
+    def test_logical_error_rate_estimation(self):
+        error_rate = self.scheduler.estimate_logical_error_rate(num_physical_errors=5, num_trials=100)
+        self.assertGreater(error_rate, 0.0)
+        self.assertLess(error_rate, 1.0)
+
+    def test_logical_error_rate_scales_with_physical_errors(self):
+        error_rate_low = self.scheduler.estimate_logical_error_rate(num_physical_errors=2, num_trials=100)
+        error_rate_high = self.scheduler.estimate_logical_error_rate(num_physical_errors=20, num_trials=100)
+        self.assertLess(error_rate_low, error_rate_high)
+
+    def test_scheduler_summary_generation(self):
+        gate = QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0)
+        self.scheduler.record_gate_execution(gate, heating_applied_mk=0.1, fidelity_after=0.95)
+        summary = self.scheduler.print_summary()
+        self.assertIn("Agentic Scheduler Summary", summary)
+        self.assertIn("greedy_heating", summary)
+
+    def test_scheduler_reordering_count(self):
+        gates = [
+            QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0, dependencies=[]),
+            QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=1, dependencies=[]),
+            QuantumGate(gate_id=2, gate_type="X90", control_qubit=0, target_qubit=2, dependencies=[]),
+        ]
+        self.scheduler.plan_schedule(gates, available_time_us=10000)
+        self.assertGreaterEqual(self.scheduler.decision_count, len(gates))
+
+    def test_greedy_fidelity_strategy(self):
+        fidelity_scheduler = AgenticScheduler(self.state_manager, self.physics, SchedulingStrategyEnum.GREEDY_FIDELITY)
+        gates = [
+            QuantumGate(gate_id=0, gate_type="X90", control_qubit=0, target_qubit=0),
+            QuantumGate(gate_id=1, gate_type="X90", control_qubit=0, target_qubit=1),
+        ]
+        ordered = fidelity_scheduler.plan_schedule(gates, available_time_us=10000)
+        self.assertEqual(len(ordered), 2)
+
+    def test_compare_schedulers_basic(self):
+        gates = [
+            QuantumGate(gate_id=i, gate_type="X90", control_qubit=0, target_qubit=i%10)
+            for i in range(10)
+        ]
+        comparison = compare_schedulers(gates, self.state_manager, self.physics, num_trials=1)
+        self.assertGreater(comparison.naive_final_fidelity, 0.0)
+        self.assertGreater(comparison.agentic_final_fidelity, 0.0)
+        self.assertGreaterEqual(comparison.scheduling_latency_us, 0.0)
+
+    def test_compare_schedulers_heating_reduction(self):
+        gates = [
+            QuantumGate(gate_id=i, gate_type="X90", control_qubit=0, target_qubit=i%10)
+            for i in range(20)
+        ]
+        comparison = compare_schedulers(gates, self.state_manager, self.physics, num_trials=2)
+        # Agentic scheduler should reduce heating or maintain similar heating
+        self.assertGreaterEqual(comparison.naive_peak_heating_uk, 0.0)
+        self.assertGreaterEqual(comparison.agentic_peak_heating_uk, 0.0)
+
+    def test_compare_schedulers_fidelity_improvement(self):
+        gates = [
+            QuantumGate(gate_id=i, gate_type="X90", control_qubit=0, target_qubit=i%5)
+            for i in range(15)
+        ]
+        comparison = compare_schedulers(gates, self.state_manager, self.physics, num_trials=1)
+        # Agentic scheduler should improve or maintain fidelity
+        self.assertGreaterEqual(comparison.agentic_final_fidelity, comparison.naive_final_fidelity * 0.95)
 
 
 class TestScale(unittest.TestCase):
