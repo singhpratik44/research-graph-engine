@@ -392,6 +392,82 @@ moves to the next item after `make validate` is green and a human has merged.
 
   Full suite: 634 tests passing; `make typecheck` clean across all 43
   modules.
+- **Eight more literature-informed improvements, a seventh research pass**
+  (ad hoc, not part of the sequenced roadmap — a research pass across
+  robustness, graph theory, and agentic architecture, scoped against
+  everything already built including the round immediately above; built
+  in full, Tier 2/3 candidates included, each with its evidentiary
+  strength stated honestly). All purely additive.
+  - **Verdict-comparison / independence tracking** (`graph_memory
+    .record_verdict_comparison`/`role_independence_rate`;
+    `specialist_review.reconcile_and_admit`/`run_specialist_pipeline`'s
+    new `track_verdict_agreement` param, off by default). "When the Tool
+    Decides" and MemSyco-Bench (both 2026) find agents tend to defer to
+    an already-available signal rather than apply independent judgment,
+    and that this gets *worse*, not better, with stronger models — but
+    that's only measurable against a real denominator including
+    agreements, which `record_disagreement` alone never captured (it only
+    ever fires when verdicts differ). One new `MemoryKind` member
+    (`VERDICT_COMPARISON`, schema `3.4.0` → `3.5.0`).
+  - **Rationale + attribution confidence on failure diagnosis**
+    (`specialist_review.PipelineFailureDiagnosis.rationale`/
+    `attribution_confidence`, populated by `diagnose_pipeline_failure`).
+    MP-Bench and TraceElephant (both 2026) find MAS failure attribution
+    often admits more than one reasonable reading, and that per-task-only
+    views bury the reasoning behind an attribution. Verified against this
+    DAG's actual code: attribution here is unambiguous by construction
+    (`Scheduler` only ever marks the truly-raised task FAILED), so
+    `attribution_confidence` is always `1.0` today — the fields exist to
+    make that certainty explicit and queryable, not because this DAG's
+    failures are currently ambiguous.
+  - **Deterministic recency ranking + implicit-staleness candidates**
+    (`graph_queries.ranked_attributed_positions_for`/
+    `possible_implicit_staleness_for`). "Don't Ask the LLM to Track
+    Freshness" (2026) finds deterministic, version-aware ordering beats
+    leaving conflict resolution to model judgment; STALE (2026) names
+    "implicit conflict" — a later observation invalidating an earlier one
+    without explicit negation — as a pattern current systems mostly fail
+    to detect. Both advisory only: neither marks anything resolved,
+    superseded, or removed; `possible_implicit_staleness_for` explicitly
+    excludes pairs `detect_conflicts_in_graph` already caught.
+  - **Intent-level governance checkpoint** (`action_policy.Intent`/
+    `IntentPolicy`/`authorize_intent_then_build_dag`). CUGA (2026, IBM
+    Research, ACM CAIS'26) names a checkpoint upstream of planning itself
+    ("Intent Guard") as distinct from a tool-call-boundary checkpoint
+    (which `ActionPolicy` already had). Genuinely new machinery, not an
+    extension: an `Intent` describes a whole planned run, and
+    `authorize_intent_then_build_dag` holds the `task_graph.TaskDAG`
+    builder itself — a blocked or escalated intent means no DAG is ever
+    constructed, not merely one built and discarded.
+  - **Mechanism-localized, reevaluation-gated repair patterns**
+    (`graph_memory.record_repair_pattern`'s new `mechanism`/`reevaluated`
+    params; `graph_evals.verified_repair_pattern_effectiveness`, a
+    stricter sibling to the existing `repair_pattern_effectiveness`).
+    WML (2026) — stronger, more direct evidence than the workshop paper
+    the original check rested on — finds localizing a repair to its
+    specific mechanism and gating it behind real post-patch
+    re-evaluation both meaningfully beat an unlocalized, ungated repair.
+    The original, weaker check is unchanged.
+  - **Memory-write soundness heuristic** (`graph_memory
+    .memory_write_soundness`). TRUSTMEM (2026) proposes a learned
+    coverage/preservation/faithfulness verifier for a memory write before
+    committing it. This is a deliberately dumb, deterministic proxy for
+    the same three questions — the `ReferenceWorker`/`word_overlap_score`
+    posture applied to memory writes instead of extraction — pure,
+    opt-in, and not wired into any `record_*` function automatically.
+  - **Trust-channels composite view** (`graph_memory.trust_channels_for`)
+    — explicitly the weakest-evidence item this round. TCHG (2026) argues
+    trust shouldn't collapse into one scalar and should decompose into
+    distinct channels; this repo already has three separate,
+    non-redundant trust signals (`trust_score_for`,
+    `provenance_weighted_trust_scores`, `trajectory_trust_score`)
+    covering similar ground informally, so TCHG's core argument is
+    largely already satisfied by design. This function computes nothing
+    new — it composes the three existing calls side by side, presentation
+    only.
+
+  Full suite: 691 tests passing; `make typecheck` clean across all 43
+  modules.
 
 ## Next
 

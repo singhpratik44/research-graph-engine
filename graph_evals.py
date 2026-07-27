@@ -398,11 +398,51 @@ def _fixture_graph_with_one_repair_pattern() -> ResearchGraph:
     return graph
 
 
+def verified_repair_pattern_effectiveness(graph: ResearchGraph) -> float:
+    """
+    A stricter bar than `repair_pattern_effectiveness`: fraction of
+    REPAIR_PATTERN records that are BOTH resolvable (as above) AND
+    explicitly marked `reevaluated=True` -- WML (2026) finds a repair
+    gated behind real post-patch re-evaluation meaningfully beats one that
+    is merely asserted and left unchecked. This does not replace or
+    change `repair_pattern_effectiveness`'s own behavior; it's an
+    additional, stricter metric alongside it, since not every existing
+    repair pattern was recorded with `reevaluated` set. Returns 1.0
+    (vacuously effective) when no repair patterns exist yet.
+    """
+    idx = graph.index()
+    records = [n for n in graph.nodes
+               if n.type == NodeType.MEMORY_RECORD.value
+               and n.properties.get("memory_kind") == MemoryKind.REPAIR_PATTERN.value]
+    if not records:
+        return 1.0
+    verified = sum(1 for r in records
+                  if r.properties.get("details", {}).get("after_node_id") in idx
+                  and r.properties.get("details", {}).get("reevaluated") is True)
+    return verified / len(records)
+
+
+def _fixture_graph_with_one_verified_repair_pattern() -> ResearchGraph:
+    graph = gf.build_fixture_graph()
+    memory.record_repair_pattern(
+        graph, "re-extracted with a higher confidence floor",
+        before_node_id="job_2606_concepts_001", after_node_id="job_2606_claims_001",
+        mechanism="confidence_floor", reevaluated=True)
+    return graph
+
+
 MEMORY_EFFECTIVENESS_CASES: List[GraphMetricCase] = [
     GraphMetricCase("no repair patterns recorded is vacuously effective",
                     gf.build_fixture_graph, repair_pattern_effectiveness, 1.0),
     GraphMetricCase("a repair pattern's after_node resolves to a real node",
                     _fixture_graph_with_one_repair_pattern, repair_pattern_effectiveness, 1.0),
+    GraphMetricCase("no repair patterns recorded is vacuously verified-effective",
+                    gf.build_fixture_graph, verified_repair_pattern_effectiveness, 1.0),
+    GraphMetricCase("an unverified repair pattern fails the stricter bar",
+                    _fixture_graph_with_one_repair_pattern, verified_repair_pattern_effectiveness, 0.0),
+    GraphMetricCase("a mechanism-localized, reevaluated repair pattern passes the stricter bar",
+                    _fixture_graph_with_one_verified_repair_pattern,
+                    verified_repair_pattern_effectiveness, 1.0),
 ]
 
 

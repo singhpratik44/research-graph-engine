@@ -184,6 +184,38 @@ class TestReconcileAndAdmit(unittest.TestCase):
         self.assertTrue(admission.admitted)
         self.assertIn(self.directive.job_id, self.graph.index())
 
+    def test_track_verdict_agreement_off_by_default_records_nothing_extra(self):
+        agree = sr.SpecialistVerdict(role=sr.ROLE_SCHEMA_VALIDATOR, passed=True, detail="ok")
+        agree2 = sr.SpecialistVerdict(role=sr.ROLE_CONFLICT_CHECKER, passed=True, detail="ok")
+        sr.reconcile_and_admit(self.graph, self.spawner, self.directive, self.env, agree, agree2)
+        comparisons = [n for n in self.graph.nodes
+                      if n.properties.get("memory_kind") == "verdict_comparison"]
+        self.assertEqual(comparisons, [])
+
+    def test_track_verdict_agreement_records_even_on_agreement(self):
+        agree = sr.SpecialistVerdict(role=sr.ROLE_SCHEMA_VALIDATOR, passed=True, detail="ok")
+        agree2 = sr.SpecialistVerdict(role=sr.ROLE_CONFLICT_CHECKER, passed=True, detail="ok")
+        sr.reconcile_and_admit(self.graph, self.spawner, self.directive, self.env, agree, agree2,
+                               track_verdict_agreement=True)
+        comparisons = [n for n in self.graph.nodes
+                      if n.properties.get("memory_kind") == "verdict_comparison"]
+        self.assertEqual(len(comparisons), 1)
+        self.assertTrue(comparisons[0].properties["details"]["agreed"])
+
+    def test_track_verdict_agreement_records_on_disagreement_too(self):
+        schema_v = sr.SpecialistVerdict(role=sr.ROLE_SCHEMA_VALIDATOR, passed=True, detail="ok")
+        conflict_v = sr.SpecialistVerdict(role=sr.ROLE_CONFLICT_CHECKER, passed=False, detail="bad")
+        sr.reconcile_and_admit(self.graph, self.spawner, self.directive, self.env,
+                               schema_v, conflict_v, track_verdict_agreement=True)
+        comparisons = [n for n in self.graph.nodes
+                      if n.properties.get("memory_kind") == "verdict_comparison"]
+        self.assertEqual(len(comparisons), 1)
+        self.assertFalse(comparisons[0].properties["details"]["agreed"])
+        # Both records exist: the disagreement AND the comparison, distinct kinds.
+        disagreements = [n for n in self.graph.nodes
+                         if n.properties.get("memory_kind") == "reviewer_disagreement"]
+        self.assertEqual(len(disagreements), 1)
+
 
 # ============================================================================
 # DAG shape
@@ -380,6 +412,23 @@ class TestRunSpecialistPipelineEndToEnd(unittest.TestCase):
         record = second.confidence_divergences[0]
         self.assertAlmostEqual(record.properties["details"]["derivation_confidence"], 0.05)
 
+    def test_track_verdict_agreement_off_by_default_end_to_end(self):
+        graph = ResearchGraph()
+        sr.run_specialist_pipeline(graph, PAPER, "Hierarchical orchestration reduces coordination overhead.")
+        comparisons = [n for n in graph.nodes
+                      if n.properties.get("memory_kind") == "verdict_comparison"]
+        self.assertEqual(comparisons, [])
+
+    def test_track_verdict_agreement_records_end_to_end_when_enabled(self):
+        graph = ResearchGraph()
+        report = sr.run_specialist_pipeline(
+            graph, PAPER, "Hierarchical orchestration reduces coordination overhead.",
+            track_verdict_agreement=True)
+        comparisons = graph_memory.memory_records_for(graph, report.job_id)
+        comparisons = [n for n in comparisons
+                      if n.properties.get("memory_kind") == "verdict_comparison"]
+        self.assertEqual(len(comparisons), 1)
+
 
 # ============================================================================
 # Selective failure-class recovery
@@ -471,6 +520,43 @@ class TestDiagnosePipelineFailure(unittest.TestCase):
         self.assertIn("blast_radius", d)
         self.assertIn("failure_classes", d)
         self.assertIn("summary", d)
+        self.assertIn("rationale", d)
+        self.assertIn("attribution_confidence", d)
+
+    def test_rationale_names_the_actual_error_for_each_root_cause(self):
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"extract"},
+            skipped={"conflict_check", "schema_validate", "reviewer_judge"},
+            spans=[self._span("extract", TaskStatus.FAILED.value, error="RuntimeError('boom')")],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(dag, run_result)
+        self.assertIn("extract", diagnosis.rationale)
+        self.assertIn("boom", diagnosis.rationale["extract"])
+
+    def test_attribution_confidence_is_full_certainty_in_this_dags_shape(self):
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"reviewer_judge"},
+            spans=[self._span("reviewer_judge", TaskStatus.FAILED.value, error="KeyError('nope')")],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(dag, run_result)
+        self.assertEqual(diagnosis.attribution_confidence, {"reviewer_judge": 1.0})
+
+    def test_rationale_and_confidence_cover_every_root_cause_not_just_one(self):
+        """Two genuinely simultaneous root causes (not producible by this
+        DAG's own code, but the function must not assume exactly one)."""
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"conflict_check", "schema_validate"},
+            spans=[
+                self._span("conflict_check", TaskStatus.FAILED.value, error="boom1"),
+                self._span("schema_validate", TaskStatus.FAILED.value, error="boom2"),
+            ],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(dag, run_result)
+        self.assertEqual(set(diagnosis.rationale), {"conflict_check", "schema_validate"})
+        self.assertEqual(set(diagnosis.attribution_confidence), {"conflict_check", "schema_validate"})
 
     def test_diagnoses_a_real_scheduler_produced_run_result(self):
         """Same real DAG, same real Scheduler run this module's own

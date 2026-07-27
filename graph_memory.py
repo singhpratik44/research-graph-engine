@@ -85,8 +85,9 @@ Purely additive; neither of those two functions is changed.
 """
 
 import hashlib
+import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from research_graph_schema import (
     Edge, EdgeType, ExtractionMethod, MemoryKind, Node, NodeType, Provenance,
@@ -280,6 +281,84 @@ def record_disagreement(
     return node
 
 
+def record_verdict_comparison(
+    graph: ResearchGraph,
+    node_id: str,
+    role_a: str,
+    verdict_a: str,
+    role_b: str,
+    verdict_b: str,
+    note: str = "",
+) -> Node:
+    """
+    Record a comparison between two specialist roles' verdicts on one run
+    -- whether they agreed or not -- unlike `record_disagreement`
+    (REVIEWER_DISAGREEMENT), which by design only ever gets called when
+    verdicts differ. "When the Tool Decides" and MemSyco-Bench (2026) both
+    find agents tend to defer to an already-available signal rather than
+    apply independent judgment, and that this gets worse, not better, with
+    stronger models -- but that's only measurable against a real
+    denominator of comparisons (agreements included), not just the
+    disagreements this repo already tracked. Opt-in: nothing calls this
+    automatically; `specialist_review.run_specialist_pipeline`'s
+    `track_verdict_agreement` param is the only current caller, off by
+    default. Linked DERIVED_FROM -> node_id (a comparison computed from
+    that run), not DISAGREED_ON -- that edge specifically means
+    disagreement, which this is not always.
+    """
+    if graph.index().get(node_id) is None:
+        raise KeyError(f"no such node: {node_id!r}")
+    agreed = verdict_a == verdict_b
+    summary = (f"{role_a} said {verdict_a!r}, {role_b} said {verdict_b!r} on {node_id} "
+              f"({'agreed' if agreed else 'disagreed'})")
+    node = _memory_node(
+        kind=MemoryKind.VERDICT_COMPARISON,
+        subject_ref=node_id,
+        summary=summary,
+        confidence=None,
+        source_paper=node_id,
+        human_reviewed=False,
+        review_notes=note,
+        details={"node_id": node_id, "role_a": role_a, "verdict_a": verdict_a,
+                 "role_b": role_b, "verdict_b": verdict_b, "agreed": agreed, "note": note},
+    )
+    graph.nodes.append(node)
+    graph.edges.append(Edge(source=node.id, target=node_id,
+                             type=EdgeType.DERIVED_FROM.value, provenance=node.provenance))
+    return node
+
+
+def role_independence_rate(graph: ResearchGraph, role_a: str, role_b: str) -> Optional[float]:
+    """
+    Fraction of recorded VERDICT_COMPARISON records between `role_a` and
+    `role_b` (in either order) where their verdicts actually differed --
+    a real independence signal, as opposed to `specialist_trust_scores`'
+    disagreement tally (which only ever sees disagreement records, never
+    a denominator that includes agreements). 0.0 means these two roles
+    have only ever echoed each other so far (a "rubber-stamp" pattern);
+    1.0 means they've never once agreed. `None` when nothing has been
+    recorded yet -- this requires `track_verdict_agreement=True` to have
+    been used at least once; it is not retroactive over
+    REVIEWER_DISAGREEMENT records alone, since those never captured the
+    agreeing cases a real rate needs.
+    """
+    total = 0
+    differed = 0
+    for n in graph.nodes:
+        if (n.type != NodeType.MEMORY_RECORD.value
+                or n.properties.get("memory_kind") != MemoryKind.VERDICT_COMPARISON.value):
+            continue
+        details = n.properties.get("details", {})
+        if {details.get("role_a"), details.get("role_b")} != {role_a, role_b}:
+            continue
+        total += 1
+        if not details.get("agreed", True):
+            differed += 1
+    if total == 0:
+        return None
+    return round(differed / total, 4)
+
+
 def record_confidence_divergence(
     graph: ResearchGraph,
     node_id: str,
@@ -438,6 +517,8 @@ def record_repair_pattern(
     description: str,
     before_node_id: str,
     after_node_id: str,
+    mechanism: Optional[str] = None,
+    reevaluated: bool = False,
 ) -> Node:
     """
     Describe the shape of a successful repair: `before_node_id` was
@@ -452,6 +533,21 @@ def record_repair_pattern(
     repo; this function doesn't need it to exist -- it just makes the memory
     shape ready to record one when it does. Today, call it for a repair a
     human carried out by hand.
+
+    `mechanism`/`reevaluated` (both optional, default `None`/`False`): WML
+    (2026) finds that localizing a repair to the specific mechanism it
+    fixed -- not just "something about this node" -- and gating it behind
+    a real post-patch re-evaluation before it's trusted, both meaningfully
+    beat an unlocalized, ungated repair. `mechanism` is a free-text label
+    (e.g. "confidence_floor", "entailment_checker", "source_paper_
+    reference") for what specifically was fixed -- deliberately a plain
+    string, not a new closed enum, the same thin-evidence posture
+    `graph_queries.derivation_mechanism_for` already takes. `reevaluated`
+    records whether that claim was actually independently checked (e.g. a
+    repeat gate/entailment run) before this pattern was recorded, as
+    opposed to merely asserted. Omitting both changes nothing for an
+    existing caller -- `graph_evals.repair_pattern_effectiveness` (the
+    existing, weaker check) is unaffected either way.
     """
     after = graph.index().get(after_node_id)
     if after is None:
@@ -468,7 +564,8 @@ def record_repair_pattern(
         human_reviewed=True,
         review_notes=description,
         details={"description": description, "before_node_id": before_node_id,
-                 "after_node_id": after_node_id},
+                 "after_node_id": after_node_id, "mechanism": mechanism,
+                 "reevaluated": reevaluated},
     )
     graph.nodes.append(node)
     graph.edges.append(Edge(source=after_node_id, target=node.id,
@@ -880,6 +977,106 @@ def trajectory_trust_score(graph: ResearchGraph, subject_ref: str) -> Optional[f
     if total_weight == 0.0:
         return None
     return round(weighted_sum / total_weight, 4)
+
+
+# ============================================================================
+# MEMORY-WRITE SOUNDNESS (thin evidence -- see docstring)
+# ============================================================================
+
+_MEMORY_WRITE_STOPWORDS: Set[str] = {
+    "the", "a", "an", "of", "to", "in", "and", "or", "that", "this", "these",
+    "those", "on", "for", "with", "as", "by", "from", "at", "be", "is", "are",
+    "was", "were", "can", "could", "will", "would", "its", "it", "not", "no",
+}
+
+
+def _soundness_tokens(text: str) -> Set[str]:
+    if not text:
+        return set()
+    words = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    return {w for w in words if len(w) > 2 and w not in _MEMORY_WRITE_STOPWORDS}
+
+
+def memory_write_soundness(summary: str, source_text: str) -> Dict[str, Any]:
+    """
+    Thin-evidence heuristic (one paper, TRUSTMEM 2026, proposes a learned
+    "Memory Transition Verifier" scoring coverage/preservation/
+    faithfulness for a memory write before committing it, to catch
+    omission/corruption/hallucination that an ungated write misses; this
+    is a deliberately dumb, deterministic proxy for the same three
+    questions -- the `ReferenceWorker`/`word_overlap_score` posture
+    applied to memory writes instead of extraction -- not a
+    reimplementation of that paper's learned model).
+
+    Scores a candidate memory-record summary against the source text it's
+    meant to summarize:
+      coverage      -- fraction of the source's content words retained in
+                       the summary (did we keep enough of the substance)
+      preservation  -- fraction of the summary's content words that also
+                       appear in the source (did we NOT invent/add
+                       unsupported content)
+      faithfulness  -- min(coverage, preservation), the same weakest-link
+                       combination `atomic_entailment_checker`
+                       (claim_verification.py) already uses, not an
+                       average that lets one strong signal hide a weak one
+
+    Pure and read-only, and opt-in: no `record_*` function in this module
+    calls this automatically before writing. A caller who wants this check
+    applies it themselves before deciding whether to call
+    `record_repair_pattern`/`record_claim_decision`/etc.
+    """
+    source_words = _soundness_tokens(source_text)
+    summary_words = _soundness_tokens(summary)
+    coverage = (len(source_words & summary_words) / len(source_words)) if source_words else 0.0
+    preservation = (len(source_words & summary_words) / len(summary_words)) if summary_words else 0.0
+    faithfulness = min(coverage, preservation)
+    return {
+        "coverage": round(coverage, 4),
+        "preservation": round(preservation, 4),
+        "faithfulness": round(faithfulness, 4),
+    }
+
+
+# ============================================================================
+# TRUST CHANNELS (weakest-evidence item this round -- see docstring)
+# ============================================================================
+
+def trust_channels_for(
+    graph: ResearchGraph,
+    role: Optional[str] = None,
+    subject_ref: Optional[str] = None,
+) -> Dict[str, Optional[float]]:
+    """
+    Presents this module's three existing, DISTINCT trust signals side by
+    side instead of collapsing them into one number: `trust_score_for`
+    (per-role agreement tally), `provenance_weighted_trust_scores`
+    (the same tally weighted by source reliability), and
+    `trajectory_trust_score` (a whole-trajectory aggregate for one
+    subject). TCHG (2026) argues trust shouldn't be collapsed into one
+    scalar and should instead be decomposed into functionally distinct
+    channels -- but this is the WEAKEST-evidence item from the research
+    pass that produced it: this repo already has three separate,
+    non-redundant trust signals covering similar ground informally, so
+    TCHG's core argument is largely already satisfied by design. This
+    function computes NOTHING new -- it is presentation only, composing
+    three existing calls into one dict so a caller can see them together,
+    not a new trust computation or a fourth channel.
+
+    `role`/`subject_ref` are each optional and independent: pass `role`
+    for the two role-keyed channels, `subject_ref` for the trajectory
+    channel, either, neither, or both. A channel whose required argument
+    is omitted is `None`, same as the underlying function would return
+    for missing data -- never a fabricated 0.0.
+    """
+    role_trust = trust_score_for(graph, role) if role is not None else None
+    weighted = (provenance_weighted_trust_scores(graph).get(role, {}).get("weighted_trust_score")
+                if role is not None else None)
+    trajectory = trajectory_trust_score(graph, subject_ref) if subject_ref is not None else None
+    return {
+        "role_agreement_trust": role_trust,
+        "provenance_weighted_trust": weighted,
+        "trajectory_trust": trajectory,
+    }
 
 
 if __name__ == "__main__":

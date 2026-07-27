@@ -269,6 +269,7 @@ def reconcile_and_admit(
     env: ResultEnvelope,
     schema_verdict: SpecialistVerdict,
     conflict_verdict: SpecialistVerdict,
+    track_verdict_agreement: bool = False,
 ) -> Tuple[AdmissionResult, List[Node]]:
     """
     If the schema validator and conflict checker disagree on whether this
@@ -279,6 +280,15 @@ def reconcile_and_admit(
     Candidate nodes aren't in the graph yet at this point, so the job's own
     id stands in for `node_id` in the memory record -- the same id the
     review_task (if one opens) will reference.
+
+    `track_verdict_agreement` (default False): when True, ALSO records a
+    graph_memory.VERDICT_COMPARISON for every run, agreement or not --
+    "When the Tool Decides"/MemSyco-Bench (2026) both find agents tend to
+    rubber-stamp an already-available signal, but that's only measurable
+    against a real denominator including agreements, which
+    record_disagreement alone never captures (it only ever fires when
+    verdicts differ). Off by default: zero behavior change, zero extra
+    memory records, for any existing caller.
     """
     disagreements: List[Node] = []
     if schema_verdict.passed != conflict_verdict.passed:
@@ -291,6 +301,15 @@ def reconcile_and_admit(
             note=f"{schema_verdict.detail} / {conflict_verdict.detail}",
         )
         disagreements.append(record)
+
+    if track_verdict_agreement:
+        graph_memory.record_verdict_comparison(
+            graph, node_id=directive.job_id,
+            role_a=ROLE_SCHEMA_VALIDATOR,
+            verdict_a="pass" if schema_verdict.passed else "fail",
+            role_b=ROLE_CONFLICT_CHECKER,
+            verdict_b="pass" if conflict_verdict.passed else "fail",
+        )
 
     # Advisory only -- prior disagreements never alter whether admit() runs.
     graph_memory.prior_disagreements_on(graph, directive.job_id)
@@ -327,6 +346,7 @@ def run_specialist_pipeline(
     max_results: Optional[int] = None,
     max_workers: int = 4,
     divergence_threshold: Optional[float] = None,
+    track_verdict_agreement: bool = False,
 ) -> SpecialistPipelineReport:
     """
     High-level entry point: spawn one extraction job, run it through the four
@@ -341,6 +361,12 @@ def run_specialist_pipeline(
     CONFIDENCE_DIVERGENCE memory record when the confidence gap is at least
     this threshold. None (the default) disables the check entirely -- zero
     behavior change for every existing caller.
+
+    `track_verdict_agreement` (default False): forwarded to
+    `reconcile_and_admit` -- when True, every run also records a
+    graph_memory.VERDICT_COMPARISON (agreement or not), giving
+    `graph_memory.role_independence_rate` a real denominator instead of
+    only ever seeing recorded disagreements. Off by default.
     """
     spawner = WorkerSpawner(graph, gate)
     worker = worker or ReferenceWorker(worker_id="specialist_reference_worker")
@@ -391,6 +417,7 @@ def run_specialist_pipeline(
             admission, disagreements = reconcile_and_admit(
                 graph, spawner, directive, env,
                 verdicts[ROLE_SCHEMA_VALIDATOR], verdicts[ROLE_CONFLICT_CHECKER],
+                track_verdict_agreement=track_verdict_agreement,
             )
             admission_box["admission"] = admission
             disagreements_box["disagreements"] = disagreements
@@ -498,12 +525,26 @@ class PipelineFailureDiagnosis:
     completed RunResult: it never changes what `resume_specialist_pipeline`
     retries, only what a caller can learn about *why* a run failed as a
     whole, in addition to `classify_specialist_failure`'s per-span view.
+
+    `rationale`/`attribution_confidence` (MP-Bench, TraceElephant -- both
+    2026): MAS failure attribution often admits more than one reasonable
+    reading, and a per-task-only view buries the reasoning that justifies
+    an attribution instead of exposing it. In THIS DAG's specific shape,
+    attribution is actually unambiguous by construction --
+    `task_graph.Scheduler` only ever marks the one task whose executor
+    truly raised as FAILED, so `attribution_confidence` is always `1.0`
+    here today. These fields exist to make that certainty an explicit,
+    queryable fact rather than an unstated assumption baked into
+    `root_cause_task_ids` alone -- not because this DAG's failures are
+    currently ambiguous (they aren't).
     """
     root_cause_task_ids: List[str]
     blast_radius: Dict[str, List[str]]  # root task_id -> skipped tasks it caused
     orchestrator_originated: bool       # did reviewer_judge itself fail, vs. cascade from upstream
     failure_classes: Dict[str, str]     # root task_id -> classify_specialist_failure() label
     summary: str
+    rationale: Dict[str, str] = field(default_factory=dict)             # root task_id -> why it's named
+    attribution_confidence: Dict[str, float] = field(default_factory=dict)  # root task_id -> [0, 1]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -512,6 +553,8 @@ class PipelineFailureDiagnosis:
             "orchestrator_originated": self.orchestrator_originated,
             "failure_classes": self.failure_classes,
             "summary": self.summary,
+            "rationale": self.rationale,
+            "attribution_confidence": self.attribution_confidence,
         }
 
 
@@ -551,6 +594,20 @@ def diagnose_pipeline_failure(
     failure_classes = {tid: classifier(spans_by_task[tid])
                        for tid in root_causes if tid in spans_by_task}
 
+    rationale: Dict[str, str] = {}
+    attribution_confidence: Dict[str, float] = {}
+    for tid in root_causes:
+        span = spans_by_task.get(tid)
+        error = span.error if span is not None else "unknown error"
+        rationale[tid] = (
+            f"task {tid!r} actually executed and its own executor raised "
+            f"({error!r}); it has no failed ancestor of its own, so this is "
+            f"the true origin, not a downstream cascade")
+        # Always 1.0 in this DAG's shape -- see the class docstring. The
+        # field exists so a future DAG shape where attribution is genuinely
+        # contested doesn't need a schema change to represent that.
+        attribution_confidence[tid] = 1.0
+
     orchestrator_originated = ROLE_REVIEWER_JUDGE in root_causes
 
     if orchestrator_originated:
@@ -569,6 +626,8 @@ def diagnose_pipeline_failure(
         orchestrator_originated=orchestrator_originated,
         failure_classes=failure_classes,
         summary=summary,
+        rationale=rationale,
+        attribution_confidence=attribution_confidence,
     )
 
 

@@ -10,6 +10,7 @@ import unittest
 
 from research_graph_schema import ExtractionType, ResearchGraph
 from research_graph_workers import ResultEnvelope, WorkerSpawner
+from task_graph import TaskDAG
 import graph_memory
 import action_policy as ap
 
@@ -563,6 +564,113 @@ class TestObligations(unittest.TestCase):
         policy = ap.ActionPolicy()
         with self.assertRaises(KeyError):
             ap.fulfill_obligation(policy, "obl_9999")
+
+
+class TestIntentPolicyRules(unittest.TestCase):
+    def test_empty_policy_always_allows(self):
+        policy = ap.IntentPolicy()
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ALLOWED)
+        self.assertEqual(decision.rule_name, "default")
+
+    def test_deny_intent_extraction_types_blocks(self):
+        policy = ap.IntentPolicy(rules=[ap.deny_intent_extraction_types({ExtractionType.CONFLICTS})])
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS, ExtractionType.CONFLICTS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+
+    def test_deny_intent_extraction_types_does_not_block_other_intents(self):
+        policy = ap.IntentPolicy(rules=[ap.deny_intent_extraction_types({ExtractionType.CONFLICTS})])
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ALLOWED)
+
+    def test_require_escalation_for_intent_types_escalates(self):
+        policy = ap.IntentPolicy(
+            rules=[ap.require_escalation_for_intent_types({ExtractionType.BENCHMARKS})])
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS, ExtractionType.BENCHMARKS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ESCALATED)
+
+    def test_max_planned_extractions_ceiling_blocks_over_limit(self):
+        policy = ap.IntentPolicy(rules=[ap.max_planned_extractions_ceiling(1)])
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS, ExtractionType.CONCEPTS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+
+    def test_max_planned_extractions_ceiling_allows_at_limit(self):
+        policy = ap.IntentPolicy(rules=[ap.max_planned_extractions_ceiling(2)])
+        intent = ap.Intent(PAPER, [ExtractionType.CLAIMS, ExtractionType.CONCEPTS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ALLOWED)
+
+    def test_block_wins_over_escalation(self):
+        policy = ap.IntentPolicy(rules=[
+            ap.require_escalation_for_intent_types({ExtractionType.CONFLICTS}),
+            ap.deny_intent_extraction_types({ExtractionType.CONFLICTS}),
+        ])
+        intent = ap.Intent(PAPER, [ExtractionType.CONFLICTS])
+        decision = policy.authorize(intent)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+
+    def test_report_tallies_decisions(self):
+        policy = ap.IntentPolicy(rules=[ap.deny_intent_extraction_types({ExtractionType.CONFLICTS})])
+        policy.authorize(ap.Intent(PAPER, [ExtractionType.CLAIMS]))
+        policy.authorize(ap.Intent(PAPER, [ExtractionType.CONFLICTS]))
+        report = policy.report()
+        self.assertEqual(report["total_decisions"], 2)
+        self.assertEqual(report["by_verdict"], {"allowed": 1, "blocked": 1})
+
+
+class TestAuthorizeIntentThenBuildDag(unittest.TestCase):
+    def test_allowed_intent_builds_the_dag(self):
+        built = []
+        def builder():
+            dag = TaskDAG()
+            dag.add_task("extract", "Extract")
+            built.append(dag)
+            return dag
+        policy = ap.IntentPolicy()
+        decision, dag = ap.authorize_intent_then_build_dag(
+            policy, ap.Intent(PAPER, [ExtractionType.CLAIMS]), builder)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ALLOWED)
+        self.assertIsNotNone(dag)
+        self.assertEqual(len(built), 1)
+
+    def test_blocked_intent_never_calls_the_dag_builder(self):
+        calls = []
+        def builder():
+            calls.append(1)
+            return TaskDAG()
+        policy = ap.IntentPolicy(rules=[ap.deny_intent_extraction_types({ExtractionType.CONFLICTS})])
+        decision, dag = ap.authorize_intent_then_build_dag(
+            policy, ap.Intent(PAPER, [ExtractionType.CONFLICTS]), builder)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.BLOCKED)
+        self.assertIsNone(dag)
+        self.assertEqual(calls, [])
+
+    def test_escalated_intent_never_calls_the_dag_builder_either(self):
+        calls = []
+        def builder():
+            calls.append(1)
+            return TaskDAG()
+        policy = ap.IntentPolicy(
+            rules=[ap.require_escalation_for_intent_types({ExtractionType.BENCHMARKS})])
+        decision, dag = ap.authorize_intent_then_build_dag(
+            policy, ap.Intent(PAPER, [ExtractionType.BENCHMARKS]), builder)
+        self.assertEqual(decision.verdict, ap.PolicyVerdict.ESCALATED)
+        self.assertIsNone(dag)
+        self.assertEqual(calls, [])
+
+    def test_to_dict_reflects_the_planned_extraction_types(self):
+        policy = ap.IntentPolicy(rules=[ap.deny_intent_extraction_types({ExtractionType.CONFLICTS})])
+        decision, _ = ap.authorize_intent_then_build_dag(
+            policy, ap.Intent(PAPER, [ExtractionType.CONFLICTS], requested_by="alice"),
+            lambda: TaskDAG())
+        d = decision.to_dict()
+        self.assertEqual(d["intent"]["planned_extraction_types"], ["conflicts"])
+        self.assertEqual(d["intent"]["requested_by"], "alice")
 
 
 if __name__ == "__main__":

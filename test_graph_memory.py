@@ -311,6 +311,22 @@ class TestRecordRepairPattern(unittest.TestCase):
         self.assertEqual(dangling, [])
         self.assertTrue(g.validate().valid)
 
+    def test_mechanism_and_reevaluated_default_to_none_and_false(self):
+        g = _graph()
+        node = mem.record_repair_pattern(
+            g, "fixed", "job_2606_concepts_001", "job_2606_claims_001")
+        self.assertIsNone(node.properties["details"]["mechanism"])
+        self.assertFalse(node.properties["details"]["reevaluated"])
+
+    def test_mechanism_and_reevaluated_are_recorded_when_given(self):
+        g = _graph()
+        node = mem.record_repair_pattern(
+            g, "fixed", "job_2606_concepts_001", "job_2606_claims_001",
+            mechanism="confidence_floor", reevaluated=True)
+        self.assertEqual(node.properties["details"]["mechanism"], "confidence_floor")
+        self.assertTrue(node.properties["details"]["reevaluated"])
+        self.assertTrue(g.validate().valid, g.validate().to_dict())
+
 
 # ===========================================================================
 # Read functions
@@ -634,6 +650,83 @@ class TestActiveMemoryRecordsFor(unittest.TestCase):
         self.assertIn(record, active)
 
 
+class TestRecordVerdictComparison(unittest.TestCase):
+    def test_records_agreement_and_links_derived_from(self):
+        g = _graph()
+        node = mem.record_verdict_comparison(g, "job_2606_claims_001",
+                                             "schema_validator", "pass",
+                                             "conflict_checker", "pass")
+        self.assertEqual(node.properties["memory_kind"], MemoryKind.VERDICT_COMPARISON.value)
+        self.assertTrue(node.properties["details"]["agreed"])
+        derived = [e for e in g.edges if e.type == EdgeType.DERIVED_FROM.value
+                   and e.source == node.id]
+        self.assertEqual(len(derived), 1)
+        self.assertEqual(derived[0].target, "job_2606_claims_001")
+        self.assertTrue(g.validate().valid, g.validate().to_dict())
+
+    def test_records_disagreement_too_unlike_record_disagreement(self):
+        g = _graph()
+        node = mem.record_verdict_comparison(g, "job_2606_claims_001",
+                                             "schema_validator", "pass",
+                                             "conflict_checker", "fail")
+        self.assertFalse(node.properties["details"]["agreed"])
+
+    def test_unknown_node_id_raises(self):
+        g = _graph()
+        with self.assertRaises(KeyError):
+            mem.record_verdict_comparison(g, "no_such_node", "a", "pass", "b", "pass")
+
+
+class TestRoleIndependenceRate(unittest.TestCase):
+    def test_none_when_nothing_recorded(self):
+        g = _graph()
+        self.assertIsNone(mem.role_independence_rate(g, "schema_validator", "conflict_checker"))
+
+    def test_all_agreements_gives_zero(self):
+        g = _graph()
+        mem.record_verdict_comparison(g, "job_2606_claims_001", "schema_validator", "pass",
+                                      "conflict_checker", "pass")
+        mem.record_verdict_comparison(g, "job_2606_concepts_001", "schema_validator", "fail",
+                                      "conflict_checker", "fail")
+        self.assertEqual(mem.role_independence_rate(g, "schema_validator", "conflict_checker"), 0.0)
+
+    def test_all_disagreements_gives_one(self):
+        g = _graph()
+        mem.record_verdict_comparison(g, "job_2606_claims_001", "schema_validator", "pass",
+                                      "conflict_checker", "fail")
+        self.assertEqual(mem.role_independence_rate(g, "schema_validator", "conflict_checker"), 1.0)
+
+    def test_mixed_rate_is_the_disagreement_fraction(self):
+        g = _graph()
+        mem.record_verdict_comparison(g, "job_2606_claims_001", "schema_validator", "pass",
+                                      "conflict_checker", "fail")
+        mem.record_verdict_comparison(g, "job_2606_concepts_001", "schema_validator", "pass",
+                                      "conflict_checker", "pass")
+        self.assertAlmostEqual(mem.role_independence_rate(g, "schema_validator", "conflict_checker"), 0.5)
+
+    def test_role_order_does_not_matter(self):
+        g = _graph()
+        mem.record_verdict_comparison(g, "job_2606_claims_001", "schema_validator", "pass",
+                                      "conflict_checker", "fail")
+        forward = mem.role_independence_rate(g, "schema_validator", "conflict_checker")
+        backward = mem.role_independence_rate(g, "conflict_checker", "schema_validator")
+        self.assertEqual(forward, backward)
+
+    def test_unrelated_role_pair_returns_none(self):
+        g = _graph()
+        mem.record_verdict_comparison(g, "job_2606_claims_001", "schema_validator", "pass",
+                                      "conflict_checker", "fail")
+        self.assertIsNone(mem.role_independence_rate(g, "extractor", "reviewer_judge"))
+
+    def test_pure_disagreement_records_do_not_count_as_comparisons(self):
+        """REVIEWER_DISAGREEMENT and VERDICT_COMPARISON are distinct kinds --
+        role_independence_rate must only ever see the latter."""
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001", "schema_validator", "pass",
+                                "conflict_checker", "fail")
+        self.assertIsNone(mem.role_independence_rate(g, "schema_validator", "conflict_checker"))
+
+
 class TestRetractionExcludedFromTrustScores(unittest.TestCase):
     def test_retracted_disagreement_no_longer_counts(self):
         g = _graph()
@@ -757,6 +850,105 @@ class TestTrajectoryTrustScore(unittest.TestCase):
         # Both records are about the same node (same provenance weight), so
         # the aggregate is a plain average of the two signals.
         self.assertAlmostEqual(mem.trajectory_trust_score(g, "job_2606_claims_001"), 0.95)
+
+
+# ===========================================================================
+# memory_write_soundness
+# ===========================================================================
+
+class TestMemoryWriteSoundness(unittest.TestCase):
+    def test_faithful_summary_scores_high_on_all_three(self):
+        source = ("Hierarchical orchestration reduces coordination overhead "
+                  "across large multi-agent fleets.")
+        summary = "Hierarchical orchestration reduces coordination overhead."
+        report = mem.memory_write_soundness(summary, source)
+        self.assertGreater(report["coverage"], 0.0)
+        self.assertEqual(report["preservation"], 1.0)  # every summary word is in the source
+        self.assertGreater(report["faithfulness"], 0.0)
+
+    def test_summary_that_invents_content_scores_low_on_preservation(self):
+        source = "Hierarchical orchestration reduces coordination overhead."
+        summary = "Quantum entanglement explains dark matter halos in spiral galaxies."
+        report = mem.memory_write_soundness(summary, source)
+        self.assertEqual(report["preservation"], 0.0)
+        self.assertEqual(report["faithfulness"], 0.0)
+
+    def test_summary_that_drops_most_content_scores_low_on_coverage(self):
+        source = ("Hierarchical orchestration reduces coordination overhead across "
+                  "large multi-agent fleets deployed in production environments.")
+        summary = "Overhead."
+        report = mem.memory_write_soundness(summary, source)
+        self.assertLess(report["coverage"], 0.5)
+
+    def test_faithfulness_is_the_weaker_of_the_two_not_an_average(self):
+        """A summary that fully covers a short source but also invents
+        extra content must not let the covered part hide the invention --
+        faithfulness is min(), not mean()."""
+        source = "Overhead reduces."
+        summary = "Overhead reduces due to quantum gravitational lensing effects."
+        report = mem.memory_write_soundness(summary, source)
+        self.assertEqual(report["faithfulness"], min(report["coverage"], report["preservation"]))
+        self.assertLess(report["faithfulness"], report["coverage"])
+
+    def test_empty_source_or_summary_scores_zero_not_crash(self):
+        self.assertEqual(mem.memory_write_soundness("", ""),
+                         {"coverage": 0.0, "preservation": 0.0, "faithfulness": 0.0})
+        self.assertEqual(mem.memory_write_soundness("some summary text", "")["coverage"], 0.0)
+        self.assertEqual(mem.memory_write_soundness("", "some source text")["preservation"], 0.0)
+
+    def test_pure_function_never_touches_a_graph(self):
+        # No graph argument at all -- sanity that this really is a pure
+        # text-scoring utility, not something that needs graph state.
+        result = mem.memory_write_soundness("a summary", "a source")
+        self.assertIsInstance(result, dict)
+
+
+# ===========================================================================
+# trust_channels_for
+# ===========================================================================
+
+class TestTrustChannelsFor(unittest.TestCase):
+    def test_all_none_when_neither_role_nor_subject_given(self):
+        g = _graph()
+        self.assertEqual(mem.trust_channels_for(g),
+                         {"role_agreement_trust": None,
+                          "provenance_weighted_trust": None,
+                          "trajectory_trust": None})
+
+    def test_role_channels_populated_when_role_given(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="pass")
+        channels = mem.trust_channels_for(g, role="schema_validator")
+        self.assertAlmostEqual(channels["role_agreement_trust"], 1.0)
+        self.assertAlmostEqual(channels["provenance_weighted_trust"], 1.0)
+        self.assertIsNone(channels["trajectory_trust"])
+
+    def test_trajectory_channel_populated_when_subject_ref_given(self):
+        g = _graph()
+        mem.record_confidence_divergence(g, "job_2606_claims_001", 0.5, 0.6)
+        channels = mem.trust_channels_for(g, subject_ref="job_2606_claims_001")
+        self.assertIsNone(channels["role_agreement_trust"])
+        self.assertIsNone(channels["provenance_weighted_trust"])
+        self.assertAlmostEqual(channels["trajectory_trust"], 0.9)
+
+    def test_matches_calling_each_underlying_function_directly(self):
+        """This is presentation only -- it must reproduce the exact values
+        the three existing functions already compute, nothing new."""
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        channels = mem.trust_channels_for(g, role="schema_validator",
+                                          subject_ref="job_2606_claims_001")
+        self.assertEqual(channels["role_agreement_trust"],
+                         mem.trust_score_for(g, "schema_validator"))
+        self.assertEqual(
+            channels["provenance_weighted_trust"],
+            mem.provenance_weighted_trust_scores(g)["schema_validator"]["weighted_trust_score"])
+        self.assertEqual(channels["trajectory_trust"],
+                         mem.trajectory_trust_score(g, "job_2606_claims_001"))
 
 
 # ===========================================================================

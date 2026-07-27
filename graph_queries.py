@@ -20,6 +20,8 @@ Eight questions an agent actually needs to ask:
   attributed_positions_for -- "what does each source actually say about this
                               subject/object" -- every claim shown as its own
                               attributed position, not collapsed into one value
+                              (ranked_attributed_positions_for orders those by
+                              recency, advisory only)
 """
 
 from typing import Any, Dict, List, Optional
@@ -141,8 +143,78 @@ def attributed_positions_for(graph: ResearchGraph, subject: str, object: str) ->
             "relation": props.get("relation"),
             "source_paper": prov.source_paper if prov else None,
             "confidence": prov.confidence if prov else None,
+            "extracted_at": prov.extracted_at if prov else None,
         })
     return out
+
+
+def ranked_attributed_positions_for(
+    graph: ResearchGraph, subject: str, object: str,
+) -> List[Dict[str, Any]]:
+    """
+    Same positions as `attributed_positions_for`, ordered by recency
+    (`Provenance.extracted_at`, most recent first) with confidence as a
+    tiebreak, and each position annotated with `is_most_recent`. "Don't
+    Ask the LLM to Track Freshness" (2026) finds a deterministic,
+    version-aware recency ordering beats leaving conflict/staleness
+    resolution to model judgment.
+
+    Advisory only, same posture as `attributed_positions_for` itself:
+    nothing here marks a position resolved, superseded, or removed --
+    `is_most_recent` is exposed so a caller can choose to weight or
+    surface the freshest attributed position first, never to silently
+    prefer or discard the others. A missing `extracted_at` sorts as the
+    oldest, never accidentally first.
+    """
+    positions = attributed_positions_for(graph, subject, object)
+    ranked = sorted(
+        positions,
+        key=lambda p: (p["extracted_at"] or "", p["confidence"] or 0.0),
+        reverse=True,
+    )
+    for i, p in enumerate(ranked):
+        p["is_most_recent"] = (i == 0)
+    return ranked
+
+
+def possible_implicit_staleness_for(
+    graph: ResearchGraph, subject: str, object: str,
+) -> List[Dict[str, Any]]:
+    """
+    Candidate pairs of attributed positions on the same (subject, object)
+    where a more recent claim exists with NO explicit `ConflictEdge`
+    linking it to an older one. STALE (2026) names exactly this "implicit
+    conflict" pattern -- a later observation invalidates an earlier one
+    without explicit negation -- and its own finding is that current
+    systems mostly FAIL to detect it. This is a candidate-surfacing
+    heuristic, not a resolved detector: returned pairs are for human
+    review, not an automatic staleness verdict, and a pair already caught
+    by `detect_conflicts_in_graph` (an explicit, opposed-relation
+    contradiction) is deliberately excluded -- that case is already
+    handled elsewhere; this surfaces what explicit conflict detection
+    structurally cannot catch (relations that aren't obviously opposed).
+    """
+    positions = ranked_attributed_positions_for(graph, subject, object)
+    conflicted_pairs = {
+        frozenset((c.source_claim_id, c.target_claim_id)) for c in graph.conflicts
+    }
+    candidates: List[Dict[str, Any]] = []
+    for i, newer in enumerate(positions):
+        for older in positions[i + 1:]:
+            if newer["claim_id"] == older["claim_id"]:
+                continue
+            pair = frozenset((newer["claim_id"], older["claim_id"]))
+            if pair in conflicted_pairs:
+                continue  # already an explicit, already-detected conflict
+            candidates.append({
+                "newer_claim_id": newer["claim_id"],
+                "older_claim_id": older["claim_id"],
+                "newer_text": newer["text"],
+                "older_text": older["text"],
+                "newer_source_paper": newer["source_paper"],
+                "older_source_paper": older["source_paper"],
+            })
+    return candidates
 
 
 def why_blocked(

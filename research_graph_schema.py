@@ -21,7 +21,7 @@ from enum import Enum
 from datetime import datetime, timezone
 import json
 
-SCHEMA_VERSION = "3.4.0"
+SCHEMA_VERSION = "3.5.0"
 
 
 # ============================================================================
@@ -155,6 +155,7 @@ class MemoryKind(str, Enum):
     CONFIDENCE_DIVERGENCE = "confidence_divergence"  # derivation- vs validation-time confidence gap
     ACTION_POLICY_DECISION = "action_policy_decision"  # a runtime ActionPolicy allow/escalate/block verdict
     MEMORY_RETRACTED = "memory_retracted"           # a prior memory record was retracted ("forget/rollback")
+    VERDICT_COMPARISON = "verdict_comparison"       # two specialist roles' verdicts on one run, agreeing or not
 
 
 def _now() -> str:

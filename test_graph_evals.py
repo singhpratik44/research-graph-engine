@@ -190,5 +190,39 @@ class TestMemoryEffectivenessMetric(unittest.TestCase):
         self.assertTrue(all(r.passed for r in results), [r.detail for r in results])
 
 
+class TestVerifiedRepairPatternEffectiveness(unittest.TestCase):
+    def test_vacuously_effective_with_no_repair_patterns(self):
+        self.assertEqual(evals.verified_repair_pattern_effectiveness(gf.build_fixture_graph()), 1.0)
+
+    def test_unreevaluated_repair_pattern_fails_the_stricter_bar(self):
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001")  # reevaluated defaults False
+        self.assertEqual(evals.verified_repair_pattern_effectiveness(graph), 0.0)
+
+    def test_reevaluated_repair_pattern_passes_the_stricter_bar(self):
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001", mechanism="confidence_floor",
+                                     reevaluated=True)
+        self.assertEqual(evals.verified_repair_pattern_effectiveness(graph), 1.0)
+
+    def test_does_not_change_the_existing_weaker_metric(self):
+        """repair_pattern_effectiveness (the pre-existing, weaker check)
+        must not be affected by mechanism/reevaluated at all."""
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001")  # unreevaluated
+        self.assertEqual(evals.repair_pattern_effectiveness(graph), 1.0)
+
+    def test_orphaned_after_node_fails_both_metrics(self):
+        graph = gf.build_fixture_graph()
+        memory.record_repair_pattern(graph, "fixed it", "job_2606_concepts_001",
+                                     "job_2606_claims_001", reevaluated=True)
+        graph.nodes = [n for n in graph.nodes if n.id != "job_2606_claims_001"]
+        self.assertLess(evals.repair_pattern_effectiveness(graph), 1.0)
+        self.assertLess(evals.verified_repair_pattern_effectiveness(graph), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

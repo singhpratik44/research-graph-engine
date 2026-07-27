@@ -46,6 +46,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from research_graph_schema import ExtractionType, Node, ResearchGraph
 from research_graph_workers import AdmissionResult, ExtractionDirective, WorkerSpawner
+from task_graph import TaskDAG
 import graph_memory
 
 
@@ -642,6 +643,161 @@ def approve_escalated_outcome(
             rule_name="human_approval", action=decision.action)
         graph_memory.record_action_policy_decision(graph, admission.job_node.id, approval)
     return admission
+
+
+# ============================================================================
+# INTENT-LEVEL GOVERNANCE (a checkpoint upstream of planning itself)
+# ============================================================================
+#
+# Everything above authorizes one PROPOSED ACTION (a single extraction) --
+# structurally the same checkpoint CUGA (2026, IBM Research) calls the
+# tool-call boundary. CUGA's distinguishing piece this repo didn't have
+# yet is a checkpoint upstream of THAT: an "Intent Guard" evaluating a
+# whole planned run's intent -- how many extractions, of what types, for
+# what paper -- BEFORE a task_graph.TaskDAG (the plan itself) is even
+# constructed. This is genuinely new machinery, not an extension of
+# ActionPolicy: an Intent describes a planned RUN, not a single action,
+# and IntentPolicy's enforcement point holds the DAG builder itself, not
+# a worker. Reuses PolicyVerdict (the same three-way ALLOWED/ESCALATED/
+# BLOCKED space) rather than inventing a fourth verdict vocabulary.
+#
+# Purely additive: nothing above is modified, and nothing calls this
+# automatically -- a caller who never constructs an IntentPolicy is
+# completely unaffected.
+
+@dataclass
+class Intent:
+    """A planned run, described BEFORE any TaskDAG or job exists for it."""
+    paper_id: str
+    planned_extraction_types: List[ExtractionType]
+    requested_by: str = ""
+
+
+@dataclass
+class IntentDecision:
+    verdict: PolicyVerdict
+    reason: str
+    rule_name: str
+    intent: Intent
+    timestamp: str = field(default_factory=_now)
+
+    @property
+    def can_proceed(self) -> bool:
+        return self.verdict in (PolicyVerdict.ALLOWED, PolicyVerdict.ESCALATED)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "verdict": self.verdict.value,
+            "reason": self.reason,
+            "rule_name": self.rule_name,
+            "intent": {
+                "paper_id": self.intent.paper_id,
+                "planned_extraction_types": [t.value for t in self.intent.planned_extraction_types],
+                "requested_by": self.intent.requested_by,
+            },
+            "timestamp": self.timestamp,
+        }
+
+
+IntentRule = Callable[[Intent], Optional[Tuple[PolicyVerdict, str]]]
+
+
+class IntentPolicy:
+    """
+    Same pluggable-rules, same precedence (first BLOCK wins, else first
+    ESCALATE, else ALLOWED) as `ActionPolicy`, but evaluated once per
+    planned run instead of once per action. Empty rules (the default)
+    allows every intent -- constructing `IntentPolicy()` and using it is
+    behaviorally identical to not using it at all.
+    """
+
+    def __init__(self, rules: Optional[List[Tuple[str, IntentRule]]] = None):
+        self.rules: List[Tuple[str, IntentRule]] = list(rules or [])
+        self.decisions: List[IntentDecision] = []
+
+    def authorize(self, intent: Intent) -> IntentDecision:
+        escalation: Optional[IntentDecision] = None
+        for name, rule in self.rules:
+            outcome = rule(intent)
+            if outcome is None:
+                continue
+            verdict, reason = outcome
+            decision = IntentDecision(verdict=verdict, reason=reason, rule_name=name, intent=intent)
+            if verdict == PolicyVerdict.BLOCKED:
+                self.decisions.append(decision)
+                return decision
+            if verdict == PolicyVerdict.ESCALATED and escalation is None:
+                escalation = decision
+
+        final = escalation or IntentDecision(
+            verdict=PolicyVerdict.ALLOWED, reason="no intent rule objected",
+            rule_name="default", intent=intent)
+        self.decisions.append(final)
+        return final
+
+    def report(self) -> Dict[str, Any]:
+        total = len(self.decisions)
+        by_verdict: Dict[str, int] = {}
+        for d in self.decisions:
+            by_verdict[d.verdict.value] = by_verdict.get(d.verdict.value, 0) + 1
+        return {"total_decisions": total, "by_verdict": by_verdict,
+                "last_10_decisions": [d.to_dict() for d in self.decisions[-10:]]}
+
+
+def deny_intent_extraction_types(denied: Set[ExtractionType]) -> Tuple[str, IntentRule]:
+    """Block a planned run outright if it includes any denied extraction type."""
+    def rule(intent: Intent) -> Optional[Tuple[PolicyVerdict, str]]:
+        hit = denied & set(intent.planned_extraction_types)
+        if hit:
+            return (PolicyVerdict.BLOCKED,
+                    f"planned run includes denied extraction type(s): "
+                    f"{sorted(t.value for t in hit)}")
+        return None
+    return "deny_intent_extraction_types", rule
+
+
+def require_escalation_for_intent_types(types: Set[ExtractionType]) -> Tuple[str, IntentRule]:
+    """Require human pre-approval before a run planning any of these types starts."""
+    def rule(intent: Intent) -> Optional[Tuple[PolicyVerdict, str]]:
+        hit = types & set(intent.planned_extraction_types)
+        if hit:
+            return (PolicyVerdict.ESCALATED,
+                    f"planned run includes extraction type(s) requiring pre-approval: "
+                    f"{sorted(t.value for t in hit)}")
+        return None
+    return "require_escalation_for_intent_types", rule
+
+
+def max_planned_extractions_ceiling(ceiling: int) -> Tuple[str, IntentRule]:
+    """Block a run that plans more distinct extraction types in one intent than policy allows."""
+    def rule(intent: Intent) -> Optional[Tuple[PolicyVerdict, str]]:
+        count = len(intent.planned_extraction_types)
+        if count > ceiling:
+            return (PolicyVerdict.BLOCKED,
+                    f"planned run includes {count} extraction type(s), "
+                    f"exceeding policy ceiling {ceiling}")
+        return None
+    return "max_planned_extractions_ceiling", rule
+
+
+def authorize_intent_then_build_dag(
+    intent_policy: IntentPolicy,
+    intent: Intent,
+    dag_builder: Callable[[], TaskDAG],
+) -> Tuple[IntentDecision, Optional[TaskDAG]]:
+    """
+    The enforcement point: authorize the whole planned run BEFORE
+    `dag_builder()` is ever called. Only ALLOWED calls it -- a BLOCKED or
+    ESCALATED intent means no `TaskDAG` is constructed at all, not merely
+    that one gets built and then discarded. This is the "upstream of
+    planning" checkpoint CUGA names: by the time `ActionPolicy.authorize()`
+    would ever run (per proposed action), a BLOCKED intent here has
+    already prevented the plan itself from existing.
+    """
+    decision = intent_policy.authorize(intent)
+    if decision.verdict != PolicyVerdict.ALLOWED:
+        return decision, None
+    return decision, dag_builder()
 
 
 if __name__ == "__main__":

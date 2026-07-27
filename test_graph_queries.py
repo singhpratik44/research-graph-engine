@@ -136,6 +136,104 @@ class TestAttributedPositionsFor(unittest.TestCase):
         self.assertEqual(len(self.graph.nodes), before)
 
 
+class TestRankedAttributedPositionsFor(unittest.TestCase):
+    def setUp(self):
+        self.graph = gf.build_fixture_graph()
+
+    def test_ties_on_recency_break_on_confidence(self):
+        """Both fixture claims share the same extracted_at -- the higher-
+        confidence one (claim_2606_001, 0.91 vs 0.87) must win the tie."""
+        ranked = q.ranked_attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(ranked[0]["claim_id"], "claim_2606_001")
+        self.assertTrue(ranked[0]["is_most_recent"])
+        self.assertFalse(ranked[1]["is_most_recent"])
+
+    def test_more_recent_extracted_at_wins_over_higher_confidence(self):
+        newer = Node(
+            "claim_newer", NodeType.CLAIM.value, "newer claim",
+            provenance=Provenance("paper_new", ExtractionMethod.STRUCTURED_LLM.value,
+                                  0.5, "2027-01-01T00:00:00+00:00"),
+            properties={"text": "A later claim.", "subject": "hierarchical orchestration",
+                       "relation": "reduces", "object": "coordination overhead"},
+        )
+        self.graph.nodes.append(newer)
+        ranked = q.ranked_attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(ranked[0]["claim_id"], "claim_newer")
+        self.assertTrue(ranked[0]["is_most_recent"])
+
+    def test_exactly_one_position_is_most_recent(self):
+        ranked = q.ranked_attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(sum(1 for p in ranked if p["is_most_recent"]), 1)
+
+    def test_missing_extracted_at_sorts_as_oldest_not_first(self):
+        no_date = Node(
+            "claim_no_date", NodeType.CLAIM.value, "undated claim",
+            provenance=None,
+            properties={"text": "An undated claim.", "subject": "hierarchical orchestration",
+                       "relation": "reduces", "object": "coordination overhead"},
+        )
+        self.graph.nodes.append(no_date)
+        ranked = q.ranked_attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertFalse(next(p for p in ranked if p["claim_id"] == "claim_no_date")["is_most_recent"])
+
+    def test_empty_when_no_shared_subject_object(self):
+        self.assertEqual(q.ranked_attributed_positions_for(self.graph, "nobody", "nothing"), [])
+
+    def test_never_mutates_the_graph(self):
+        before = len(self.graph.nodes)
+        q.ranked_attributed_positions_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(len(self.graph.nodes), before)
+
+
+class TestPossibleImplicitStalenessFor(unittest.TestCase):
+    def setUp(self):
+        self.graph = gf.build_fixture_graph()
+
+    def test_already_explicitly_conflicting_pair_is_excluded(self):
+        """claim_2606_001/claim_2701_014 already have a ConflictEdge --
+        explicit conflict detection already caught this pair, so it must
+        not also show up as an 'implicit' staleness candidate."""
+        candidates = q.possible_implicit_staleness_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(candidates, [])
+
+    def test_a_pair_without_an_explicit_conflict_edge_surfaces(self):
+        third = Node(
+            "claim_third", NodeType.CLAIM.value, "a third position",
+            provenance=Provenance("paper_third", ExtractionMethod.STRUCTURED_LLM.value,
+                                  0.6, "2027-01-01T00:00:00+00:00"),
+            properties={"text": "A later, unrelated-in-conflict-terms position.",
+                       "subject": "hierarchical orchestration",
+                       "relation": "has no measurable effect on",
+                       "object": "coordination overhead"},
+        )
+        self.graph.nodes.append(third)
+        candidates = q.possible_implicit_staleness_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        pairs = {(c["newer_claim_id"], c["older_claim_id"]) for c in candidates}
+        self.assertIn(("claim_third", "claim_2606_001"), pairs)
+        self.assertIn(("claim_third", "claim_2701_014"), pairs)
+        # The already-conflicting original pair is still excluded.
+        self.assertNotIn(("claim_2606_001", "claim_2701_014"), pairs)
+        self.assertNotIn(("claim_2701_014", "claim_2606_001"), pairs)
+
+    def test_empty_with_fewer_than_two_positions(self):
+        self.assertEqual(q.possible_implicit_staleness_for(self.graph, "nobody", "nothing"), [])
+
+    def test_never_mutates_the_graph(self):
+        before_nodes = len(self.graph.nodes)
+        before_conflicts = len(self.graph.conflicts)
+        q.possible_implicit_staleness_for(
+            self.graph, "hierarchical orchestration", "coordination overhead")
+        self.assertEqual(len(self.graph.nodes), before_nodes)
+        self.assertEqual(len(self.graph.conflicts), before_conflicts)
+
+
 class TestWhyBlockedAndBlockedJobs(unittest.TestCase):
     def test_why_blocked_on_low_confidence_job(self):
         graph = gf.build_fixture_graph()
