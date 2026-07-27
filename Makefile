@@ -1,7 +1,13 @@
-.PHONY: test inspect roadmap evals conformance validate web report
+.PHONY: test inspect roadmap evals conformance validate web report typecheck
 
 test:
 	python3 -m unittest discover -p "test_*.py"
+
+# Static type check (mypy.ini). Separate from `validate` on purpose -- CLAUDE.md's
+# definition of "done" is test + evals + conformance; this is additional rigor,
+# not a redefinition of that contract. Needs requirements-dev.txt installed.
+typecheck:
+	python3 -m mypy $(wildcard *.py)
 
 inspect:
 	python3 graph_inspector.py

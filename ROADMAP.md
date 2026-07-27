@@ -154,6 +154,171 @@ moves to the next item after `make validate` is green and a human has merged.
   capability gaps (`gap_typed_provenance_edges`, `gap_claim_source_verify`,
   `gap_roadmap_queries`, `gap_adaptive_recovery`, `gap_multidim_review`).
   Merged via PR #1 into `main` (merge commit `bb74dae4`).
+- Repo hardening pass (ad hoc, not part of the sequenced roadmap — same
+  spirit as the QIH corpus and the literature-informed improvements
+  above: infrastructure/portfolio work, not a queued capability gap).
+  - **`LLMWorker`** (`llm_worker.py`). A drop-in for `ReferenceWorker`
+    backed by a real Claude API call instead of regex heuristics,
+    satisfying the identical `ExtractionDirective`-in/`ResultEnvelope`-out
+    contract — `WorkerSpawner.admit()` needs no changes to accept its
+    output. `call_model` is injected (same pattern as `arxiv_ingest.py`'s
+    `http_get`), so parsing/envelope-construction is fully tested (19
+    tests) without a network call; the real call path needs
+    `ANTHROPIC_API_KEY`, which this sandbox has never had, so it's
+    written but not exercised end-to-end here — stated plainly per
+    CLAUDE.md rule 5, not left implicit.
+  - **`make typecheck`** (`mypy.ini`, wired into CI as a step separate
+    from `make validate` — additional rigor, not a redefinition of
+    CLAUDE.md's test+evals+conformance "done" contract). Fixed the real
+    type-honesty gaps it surfaced: a genuine bug in `specialist_review
+    .py`'s `reconcile_and_admit` return-type annotation (bare tuple
+    syntax, not `Tuple[...]`); `research_graph_gates.Provenance
+    .confidence` was typed `float` but already handled `None`
+    defensively — now `Optional[float]`, honestly; the intentional
+    `research_graph_gates.Node`/`research_graph_schema.Node` duck-typing
+    bridge and `graph_memory.py`'s soft `TaskSpan` import fallback are
+    now documented with explicit, reasoned `type: ignore` comments
+    instead of silently mismatching or being blanket-suppressed.
+  - **CI** (`.github/workflows/ci.yml`) running `make validate` and
+    `make typecheck` on every push/PR — previously `make validate` only
+    ever ran locally, so a PR showed zero check runs.
+  - **`LICENSE`** (MIT) and **README screenshots** (`docs/webapp-*.png`,
+    captured from a live `uvicorn` run against the real demo graph) —
+    both closing gaps in what a reader can verify without cloning and
+    running the repo themselves.
+  - **Domain-pluggable `LLMWorker` prompts** (`llm_worker.py`'s
+    `domain=` param — `research` (default, byte-for-byte the original
+    wording), `hiring`, `ops_approval`, `compliance`, or a full
+    `prompt_overrides` escape hatch). Closes a real gap between what
+    README.md claims ("the same schema/gate/query pattern applies to
+    hiring pipelines, ops approvals, compliance review") and what the
+    one LLM-backed worker actually demonstrated: only the framing
+    sentence changes per domain, the JSON field contract
+    (`_field_instructions`) stays identical and domain-independent.
+
+  Full suite: 460 tests passing; `make typecheck` clean across all 41
+  modules.
+- Four more literature-informed engine improvements (ad hoc, not part of
+  the sequenced roadmap — same posture as the two rounds above: this came
+  from a dedicated research pass over 10 more real studies/papers from the
+  last ~3 months, not from working the backlog in order). All four are
+  purely additive; every pre-existing test passes unmodified.
+  - **Confidence divergence** (`graph_memory.record_confidence_divergence`/
+    `confidence_divergence_for`; `specialist_review.check_confidence_
+    divergence`, wired into `run_specialist_pipeline`'s new
+    `divergence_threshold=None` param). A claim's confidence at first
+    derivation vs. a later re-validation can drift; three independent
+    papers converge on treating that drift as a first-class signal
+    instead of silently overwriting the old reading. One new `MemoryKind`
+    member (`CONFIDENCE_DIVERGENCE`, schema `3.1.0` → `3.2.0`) — zero
+    `NODE_SCHEMA` structural change, since `memory_kind` was already
+    enum-validated.
+  - **Selective failure-class recovery** (`specialist_review
+    .resumable_tasks`/`classify_specialist_failure`/
+    `resume_specialist_pipeline`). Today a failed extraction cascades
+    SKIPPED to all three other specialist tasks, and any retry redoes the
+    whole four-role pipeline; two papers converge on selective,
+    failure-class-driven recovery instead. Resuming only re-attempts
+    stale tasks — if only `reviewer_judge` failed (the one partial
+    pattern this DAG's code can actually produce), only it re-runs,
+    reusing the prior envelope and verdicts without re-invoking the
+    worker. Explicitly rejected: exposing `Scheduler`'s retry knobs
+    across the whole DAG, since a naive blind retry risked a
+    double-admission if `admit()` were ever reachable twice.
+  - **Specialist trust scores** (`graph_memory.specialist_trust_scores`/
+    `trust_score_for`). Aggregates every recorded reviewer disagreement
+    into a per-role agreement/disagreement tally against the disputed
+    node's own eventual outcome — no new signed-edge schema, since the
+    ground truth for "who was right" already lives in the graph. An
+    outcome that's still undecided never falsely counts as a
+    disagreement.
+  - **Derivation-mechanism classification** (`graph_queries
+    .derivation_mechanism_for`/`derivation_mechanism_breakdown`). The
+    thinnest-evidence feature of the four (single paper) — deliberately
+    built as plain classification strings from existing node data, not a
+    new `ExtractionMethod` schema member, since committing a new closed
+    enum ahead of a real producer would be premature.
+
+  Full suite: 493 tests passing.
+- **Runtime action-policy enforcement** (`action_policy.py`, new module;
+  ad hoc, not part of the sequenced roadmap — a research pass on
+  "runtime policy enforcement for autonomous agents" surfaced a real
+  architectural gap this closes). Every existing check in this repo
+  (`WorkflowGate`, the specialist verdicts) evaluates a claim/node
+  *after* a worker already produced it — post-hoc data validation, not
+  runtime action enforcement. `ActionPolicy.authorize()` evaluates a
+  *proposed* extraction (paper_id, extraction_type, confidence_floor,
+  max_results) before any worker is invoked, returning ALLOWED /
+  ESCALATED / BLOCKED from pluggable rules. `authorize_then_spawn()` is
+  the actual enforcement point: only ALLOWED spawns immediately — both
+  ESCALATED and BLOCKED hold the action, no job node created, no worker
+  invoked. `approve_escalated_action()` is the only way an escalated
+  action proceeds (a human decision, not automatic); a BLOCKED one
+  can't be approved past at all (`ValueError` if attempted) — the
+  policy said no, not "ask a human." One new `MemoryKind` member
+  (`ACTION_POLICY_DECISION`, schema `3.2.0` → `3.3.0`) persists every
+  decision as durable audit evidence via `graph_memory
+  .record_action_policy_decision`/`action_policy_decisions_for`,
+  linked to the real job node when one exists (a blocked action, by
+  definition, has none to link to). Purely additive:
+  `research_graph_workers.py`, `research_graph_gates.py`,
+  `specialist_review.py` are all unmodified — this only calls
+  `WorkerSpawner.spawn()` and the new `graph_memory` function.
+
+  Full suite: 517 tests passing.
+- **Three literature-informed hardening improvements** (ad hoc, not part of
+  the sequenced roadmap — a research pass across robustness, graph-theory,
+  and agentic-architecture lenses, scoped against everything already built
+  this project, surfaced these as the three candidates with genuine
+  multi-paper convergence and a clean fit to an existing module; weaker,
+  single-paper or extrapolated candidates from the same pass were
+  deliberately left undone). All three are purely additive.
+  - **Closed-loop (post-execution) action-policy enforcement**
+    (`action_policy.py`'s `ExecutionOutcome`/`authorize_outcome()`/
+    `authorize_execute_then_admit()`/`approve_escalated_outcome()`).
+    `authorize_then_spawn()` alone only ever authorizes a *declared*
+    action before it runs — GAAT (arXiv 2604.05119) names exactly this
+    "observe-but-do-not-act" gap in real agent telemetry.
+    `authorize_execute_then_admit()` runs the worker only if the
+    pre-action check is ALLOWED, then re-authorizes the *realized*
+    outcome (`block_low_average_confidence_outcome`,
+    `max_nodes_produced_ceiling`, `escalate_on_worker_failure`) before
+    `spawner.admit()` is ever called — a worker's side effects can't be
+    undone, but a blocked/escalated outcome never reaches the graph.
+    `approve_escalated_outcome()` admits an already-produced, held
+    envelope without re-invoking the worker. `authorize_then_spawn`/
+    `approve_escalated_action` are both unchanged.
+  - **Trajectory-level failure diagnosis** (`specialist_review
+    .diagnose_pipeline_failure`/`PipelineFailureDiagnosis`). VerifyMAS and
+    "Recognize Your Orchestrator" (ICML 2026) both find per-task failure
+    classification misses errors that only show up across a DAG's full
+    trajectory, and that failures concentrate at the orchestrating role
+    (here, `reviewer_judge`) rather than uniformly across executors.
+    `diagnose_pipeline_failure()` reads root-cause task(s), blast radius,
+    and whether the failure originated at `reviewer_judge` itself
+    directly off an already-completed `RunResult` — advisory only, it
+    never changes what `resume_specialist_pipeline` retries.
+    `classify_specialist_failure`/`resume_specialist_pipeline` are both
+    unchanged.
+  - **Provenance-bound trust + governed retraction** (`graph_memory
+    .provenance_trust_weight_for`/`provenance_bound_confidence`/
+    `provenance_weighted_trust_scores`; `retract_memory_record`/
+    `is_retracted`/`active_memory_records_for`). Two independent 2026
+    papers (a long-term agent-memory-security survey and a
+    provenance-capped belief-updating paper) converge on capping trust
+    by source provenance rather than a source's own self-reported
+    confidence, and on treating "Forget & Rollback" as a first-class,
+    security-relevant lifecycle phase this repo's `MemoryKind` enum
+    previously had no analog for (schema `3.3.0` → `3.4.0`, one new
+    member: `MEMORY_RETRACTED`). `provenance_weighted_trust_scores` is a
+    new, parallel aggregation to `specialist_trust_scores` — the latter
+    is otherwise unchanged in its own arithmetic, and now additionally
+    skips retracted disagreements (a no-op for any graph that never
+    retracts one). Retraction is itself a new, append-only memory record
+    linked back to what it retracts — never a deletion or in-place edit.
+
+  Full suite: 568 tests passing; `make typecheck` clean across all 43
+  modules.
 
 ## Next
 

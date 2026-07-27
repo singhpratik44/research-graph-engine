@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: make validate (tests + evals + conformance)
+        run: make validate
+
+      - name: make typecheck (mypy)
+        run: make typecheck
+
+      - name: make inspect
+        run: make inspect
+
+      - name: make roadmap
+        run: make roadmap
+
+      - name: Structured run report
+        run: python3 run_report.py

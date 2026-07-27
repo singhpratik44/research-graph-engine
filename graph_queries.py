@@ -21,7 +21,9 @@ Seven questions an agent actually needs to ask:
 
 from typing import Any, Dict, List, Optional
 
-from research_graph_schema import Node, ConflictEdge, ResearchGraph, NodeType, EdgeType
+from research_graph_schema import (
+    ConflictEdge, EdgeType, ExtractionMethod, Node, NodeType, ResearchGraph,
+)
 import research_graph_gates as gates
 import graph_algorithms
 
@@ -171,6 +173,40 @@ def status_summary(graph: ResearchGraph) -> Dict[str, Any]:
         "review_status": review_status,
         "unresolved_conflicts": len(unresolved_conflicts(graph)),
     }
+
+
+def derivation_mechanism_for(node: Node) -> str:
+    """
+    Classify an existing node's derivation mechanism purely from data
+    already on it -- its Provenance.extraction_method plus whether its
+    properties look like a full subject/relation/object triple vs. bare
+    text. A plain string, not a new schema-validated enum: nothing here
+    can become a second, competing source of truth for extraction_method
+    itself, which is why this stays in the read-only query layer rather
+    than becoming a new closed enum ahead of a real producer for one.
+    """
+    if node.provenance is not None:
+        method = node.provenance.extraction_method
+        if method == ExtractionMethod.MEMORY_WRITE.value:
+            return "memory_synthesis"
+        if method == ExtractionMethod.HUMAN_ANNOTATION.value:
+            return "human_annotated"
+    props = node.properties or {}
+    if props.get("subject") and props.get("relation") and props.get("object"):
+        return "structured_relational"
+    if props.get("text"):
+        return "structured_named"
+    return "unclassified"
+
+
+def derivation_mechanism_breakdown(graph: ResearchGraph) -> Dict[str, int]:
+    """How many nodes fall into each derivation-mechanism class -- "how was
+    most of this graph actually produced" as a queryable question."""
+    breakdown: Dict[str, int] = {}
+    for n in graph.nodes:
+        key = derivation_mechanism_for(n)
+        breakdown[key] = breakdown.get(key, 0) + 1
+    return breakdown
 
 
 def detect_job_dependency_cycles(graph: ResearchGraph) -> List[List[str]]:

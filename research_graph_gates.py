@@ -6,10 +6,18 @@ Implements should_unlock_next_stage() with explicit reason codes + structured tr
 """
 
 from dataclasses import dataclass, asdict, field
-from typing import Callable, Dict, List, Tuple, Optional, Any
+from typing import Callable, Dict, List, Tuple, Optional, Any, TYPE_CHECKING
 from enum import Enum
 from datetime import datetime
 import json
+
+if TYPE_CHECKING:
+    # Type-checking only -- this module is deliberately schema-agnostic at
+    # runtime (it defines its own local Node/Provenance stubs below and never
+    # imports research_graph_schema), so this import has zero runtime effect.
+    # It exists only so mypy can resolve the "ResearchGraph" forward references
+    # used as a type hint throughout this file.
+    from research_graph_schema import ResearchGraph
 
 # ============================================================================
 # REASON CODES (Explicit Gate Verdicts)
@@ -83,7 +91,10 @@ class GateDecision:
 class Provenance:
     source_paper: str
     extraction_method: str
-    confidence: float
+    # Optional, not float: _check_confidence_above_threshold already treats a
+    # missing confidence as LOW_CONFIDENCE (checks `is None` before use) --
+    # this annotation just makes that already-defensive handling honest.
+    confidence: Optional[float]
     extracted_at: str
     human_reviewed: bool = False
     review_notes: str = ""
@@ -496,7 +507,8 @@ class WorkflowGate:
 
         conf = node.provenance.confidence
         if conf < self.confidence_threshold:
-            waiver, defects = (None, [])
+            waiver: Optional[Any] = None
+            defects: List[str] = []
             if self.honor_waivers:
                 waiver, defects = self._find_waiver(node, graph)
 
@@ -521,7 +533,7 @@ class WorkflowGate:
                     }
                 )
 
-            evidence = {
+            evidence: Dict[str, Any] = {
                 "confidence": conf,
                 "threshold": self.confidence_threshold,
                 "gap": self.confidence_threshold - conf,
@@ -673,7 +685,7 @@ class WorkflowGate:
         allowed = sum(1 for d in self.decisions if d.can_proceed)
         blocked = total - allowed
 
-        by_reason = {}
+        by_reason: Dict[str, int] = {}
         for d in self.decisions:
             code = d.reason_code.value
             by_reason[code] = by_reason.get(code, 0) + 1

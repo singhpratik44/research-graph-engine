@@ -12,8 +12,13 @@ a SpecialistPipelineReport, instead of collapsing them into the single
 short-circuited GateDecision.
 
 Purely additive. research_graph_gates.py, research_graph_workers.py,
-research_graph_schema.py, task_graph.py, graph_memory.py, and
-graph_orchestrator.py are not modified -- this module only calls into them.
+task_graph.py, and graph_orchestrator.py are not modified -- this module
+only calls into them. research_graph_schema.py gained one closed-enum
+member (MemoryKind.CONFIDENCE_DIVERGENCE) and graph_memory.py gained
+confidence-divergence recording/reading -- both purely additive, added to
+support the optional confidence-divergence check below (opt-in via
+run_specialist_pipeline's divergence_threshold, default None, zero
+behavior change for every existing caller).
 
 Two of the four roles were already "built" per graph_orchestrator.py's own
 docstring, just not surfaced as an explicit, observable verdict:
@@ -41,7 +46,7 @@ concurrently; reviewer_judge depends on both.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from research_graph_schema import (
     ExtractionType, Node, ResearchGraph, ValidationError,
@@ -50,10 +55,10 @@ from research_graph_schema import (
 import research_graph_gates as gates
 import graph_memory
 from research_graph_workers import (
-    AdmissionResult, ExtractionDirective, ReferenceWorker, ResultEnvelope,
-    WorkerSpawner,
+    AdmissionResult, ExtractionDirective, PRODUCES_NODE_TYPE, ReferenceWorker,
+    ResultEnvelope, WorkerSpawner,
 )
-from task_graph import RunResult, Scheduler, TaskDAG
+from task_graph import RunResult, Scheduler, TaskDAG, TaskSpan, TaskStatus
 
 ROLE_EXTRACTOR = "extractor"
 ROLE_SCHEMA_VALIDATOR = "schema_validator"
@@ -102,6 +107,15 @@ class SpecialistPipelineReport:
     admission: Optional[AdmissionResult] = None
     disagreements: List[Node] = field(default_factory=list)
     run_result: Optional[RunResult] = None
+    # Confidence-divergence memory records (graph_memory.CONFIDENCE_DIVERGENCE)
+    # written when a re-derived candidate's confidence diverged from its
+    # already-admitted prior reading by at least divergence_threshold.
+    # Always empty unless run_specialist_pipeline's divergence_threshold is set.
+    confidence_divergences: List[Node] = field(default_factory=list)
+    # The extractor's raw envelope, kept for a caller that wants to resume a
+    # partially-failed run (see resume_specialist_pipeline) without
+    # re-invoking the worker for tasks that already completed successfully.
+    envelope: Optional[ResultEnvelope] = None
 
     def verdict_for(self, role: str) -> Optional[SpecialistVerdict]:
         return next((v for v in self.verdicts if v.role == role), None)
@@ -118,6 +132,10 @@ class SpecialistPipelineReport:
     def has_disagreement(self) -> bool:
         return bool(self.disagreements)
 
+    @property
+    def has_confidence_divergence(self) -> bool:
+        return bool(self.confidence_divergences)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "paper_id": self.paper_id,
@@ -127,8 +145,10 @@ class SpecialistPipelineReport:
             "all_specialist_checks_passed": self.all_specialist_checks_passed,
             "held_for_review": self.held_for_review,
             "has_disagreement": self.has_disagreement,
+            "has_confidence_divergence": self.has_confidence_divergence,
             "admission": self.admission.to_dict() if self.admission else None,
             "disagreements": [d.id for d in self.disagreements],
+            "confidence_divergences": [d.id for d in self.confidence_divergences],
         }
 
 
@@ -199,6 +219,45 @@ def verdict_from_conflict_check(candidate_nodes: List[Node],
     )
 
 
+def check_confidence_divergence(
+    graph: ResearchGraph,
+    candidate_nodes: List[Node],
+    existing_nodes: List[Node],
+    threshold: float,
+) -> List[Node]:
+    """
+    For each candidate whose id already exists among existing_nodes (a
+    re-derivation of an already-admitted node -- ReferenceWorker/LLMWorker
+    both mint deterministic ids from paper_id+text, so re-running the same
+    extraction reproduces the same candidate ids), compare the prior node's
+    confidence ("derivation") to the new candidate's ("validation"). A gap
+    of at least `threshold` is recorded via graph_memory
+    .record_confidence_divergence -- advisory only, same posture as
+    reconcile_and_admit's disagreement recording: this never blocks or
+    alters admission, it only makes the gap a durable, queryable fact
+    instead of a silent overwrite of Provenance.confidence.
+    """
+    existing_by_id = {n.id: n for n in existing_nodes}
+    divergences: List[Node] = []
+    for candidate in candidate_nodes:
+        prior = existing_by_id.get(candidate.id)
+        if prior is None:
+            continue
+        derivation_conf = prior.provenance.confidence if prior.provenance else None
+        validation_conf = candidate.provenance.confidence if candidate.provenance else None
+        if derivation_conf is None or validation_conf is None:
+            continue
+        if abs(validation_conf - derivation_conf) >= threshold:
+            divergences.append(graph_memory.record_confidence_divergence(
+                graph, node_id=candidate.id,
+                derivation_confidence=derivation_conf,
+                validation_confidence=validation_conf,
+                note=f"gap {abs(validation_conf - derivation_conf):.2f} >= "
+                     f"threshold {threshold:.2f}",
+            ))
+    return divergences
+
+
 # ============================================================================
 # RECONCILIATION + COMMIT
 # ============================================================================
@@ -210,7 +269,7 @@ def reconcile_and_admit(
     env: ResultEnvelope,
     schema_verdict: SpecialistVerdict,
     conflict_verdict: SpecialistVerdict,
-) -> (AdmissionResult, List[Node]):
+) -> Tuple[AdmissionResult, List[Node]]:
     """
     If the schema validator and conflict checker disagree on whether this
     batch is clean, record that disagreement in graph memory (advisory
@@ -267,12 +326,21 @@ def run_specialist_pipeline(
     confidence_floor: float = 0.0,
     max_results: Optional[int] = None,
     max_workers: int = 4,
+    divergence_threshold: Optional[float] = None,
 ) -> SpecialistPipelineReport:
     """
     High-level entry point: spawn one extraction job, run it through the four
     specialist roles over a genuine task_graph.Scheduler-run DAG (extract ->
     {conflict_check, schema_validate} in parallel -> reviewer_judge), and
     return one reconciled report.
+
+    `divergence_threshold` (default None): when set, reviewer_judge also
+    checks each candidate against any already-admitted node sharing its id
+    (a re-derivation of the same paper_id+text -- workers mint deterministic
+    ids, so this only fires on a genuine re-run) and records a
+    CONFIDENCE_DIVERGENCE memory record when the confidence gap is at least
+    this threshold. None (the default) disables the check entirely -- zero
+    behavior change for every existing caller.
     """
     spawner = WorkerSpawner(graph, gate)
     worker = worker or ReferenceWorker(worker_id="specialist_reference_worker")
@@ -284,6 +352,7 @@ def run_specialist_pipeline(
     envelope_box: Dict[str, ResultEnvelope] = {}
     admission_box: Dict[str, AdmissionResult] = {}
     disagreements_box: Dict[str, List[Node]] = {}
+    divergences_box: Dict[str, List[Node]] = {}
 
     def executor(task_id: str) -> Optional[Dict[str, float]]:
         if task_id == "extract":
@@ -313,6 +382,12 @@ def run_specialist_pipeline(
 
         if task_id == "reviewer_judge":
             env = envelope_box["env"]
+            divergences: List[Node] = []
+            if divergence_threshold is not None:
+                divergences = check_confidence_divergence(
+                    graph, env.nodes, existing_nodes, divergence_threshold)
+            divergences_box["divergences"] = divergences
+
             admission, disagreements = reconcile_and_admit(
                 graph, spawner, directive, env,
                 verdicts[ROLE_SCHEMA_VALIDATOR], verdicts[ROLE_CONFLICT_CHECKER],
@@ -327,7 +402,8 @@ def run_specialist_pipeline(
                         f"status={admission.job_node.properties.get('status')}"),
                 evidence={"admitted": admission.admitted,
                           "held_for_review": admission.review_task is not None,
-                          "disagreements": len(disagreements)},
+                          "disagreements": len(disagreements),
+                          "confidence_divergences": len(divergences)},
             )
             verdicts[ROLE_REVIEWER_JUDGE] = verdict
             return {}
@@ -345,6 +421,277 @@ def run_specialist_pipeline(
         admission=admission_box.get("admission"),
         disagreements=disagreements_box.get("disagreements", []),
         run_result=run_result,
+        confidence_divergences=divergences_box.get("divergences", []),
+        envelope=envelope_box.get("env"),
+    )
+
+
+# ============================================================================
+# SELECTIVE FAILURE-CLASS RECOVERY
+# ============================================================================
+
+def resumable_tasks(dag: TaskDAG, run_result: RunResult) -> Set[str]:
+    """
+    Every task that needs to be re-attempted to resume a partially-failed
+    run: FAILED/SKIPPED tasks, plus (fixed-point closure) anything whose
+    dependencies include an already-stale task. Generalizes
+    TaskDAG.failed_ancestors' transitive-closure idea to "what must be
+    redone," not just "what caused this" -- in this DAG's own shape,
+    Scheduler's cascade already makes failed|skipped transitively closed,
+    but this doesn't assume that; it's a real fixed point over the DAG's
+    actual edges, reusable regardless of DAG shape.
+    """
+    stale: Set[str] = set(run_result.failed) | set(run_result.skipped)
+    changed = True
+    while changed:
+        changed = False
+        for task_id in dag.nodes:
+            if task_id in stale:
+                continue
+            if any(dep in stale for dep in dag.dependencies_of(task_id)):
+                stale.add(task_id)
+                changed = True
+    return stale
+
+
+def _drop_downstream(dag: TaskDAG, stale: Set[str], task_id: str) -> None:
+    """Remove task_id and everything that (transitively) depends on it from `stale`."""
+    if task_id not in stale:
+        return
+    stale.discard(task_id)
+    for e in dag.edges:
+        if e.target == task_id:  # e.source depends_on task_id
+            _drop_downstream(dag, stale, e.source)
+
+
+def classify_specialist_failure(span: TaskSpan) -> str:
+    """
+    Pure, deterministic classification of a FAILED specialist task's span --
+    the classify_rejection (research_graph_workers.py) pattern applied one
+    level up, over specialist tasks instead of admit() rejections. Not
+    wired into anything by default; a caller passes it to
+    resume_specialist_pipeline's `classifier` param to decide what's worth
+    retrying.
+    """
+    if span.status != TaskStatus.FAILED.value:
+        return "unclassified"
+    if span.task_id == "extract":
+        if "unsupported extraction_type" in span.error:
+            return "unsupported_extraction_type"  # permanent -- extraction_type is fixed for the run
+        return "worker_reported_failure"  # plausibly transient
+    return "specialist_internal_error"  # conflict_check/schema_validate/reviewer_judge
+                                          # never raise on valid input today -- a real bug, not
+                                          # something worth a blind retry
+
+
+@dataclass
+class PipelineFailureDiagnosis:
+    """
+    Trajectory-level failure diagnosis over one whole specialist-pipeline
+    run, not one task's local status in isolation. VerifyMAS and "Recognize
+    Your Orchestrator" (ICML 2026) both find that per-task/per-log failure
+    classification misses errors that only show up across a DAG's full
+    execution trajectory, and that failures concentrate at the
+    orchestrating role (here, reviewer_judge -- the role that reconciles
+    both parallel branches and commits) rather than uniformly across
+    executor roles. This is advisory, read-only diagnosis over an already-
+    completed RunResult: it never changes what `resume_specialist_pipeline`
+    retries, only what a caller can learn about *why* a run failed as a
+    whole, in addition to `classify_specialist_failure`'s per-span view.
+    """
+    root_cause_task_ids: List[str]
+    blast_radius: Dict[str, List[str]]  # root task_id -> skipped tasks it caused
+    orchestrator_originated: bool       # did reviewer_judge itself fail, vs. cascade from upstream
+    failure_classes: Dict[str, str]     # root task_id -> classify_specialist_failure() label
+    summary: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "root_cause_task_ids": self.root_cause_task_ids,
+            "blast_radius": self.blast_radius,
+            "orchestrator_originated": self.orchestrator_originated,
+            "failure_classes": self.failure_classes,
+            "summary": self.summary,
+        }
+
+
+def diagnose_pipeline_failure(
+    dag: TaskDAG,
+    run_result: RunResult,
+    classifier: Callable[[TaskSpan], str] = classify_specialist_failure,
+) -> Optional[PipelineFailureDiagnosis]:
+    """
+    Trajectory-level diagnosis over a whole run: which task(s) actually
+    failed (as opposed to merely cascading SKIPPED because they depended on
+    one that did), how far the resulting blast radius reached, whether the
+    orchestrating role (reviewer_judge) itself originated the failure, and
+    each root cause's failure class. Returns `None` if the run fully
+    succeeded -- there is nothing to diagnose.
+
+    `run_result.failed` IS the root-cause set here: `Scheduler` only ever
+    marks a task FAILED when it actually ran its executor and that raised;
+    every task that becomes unreachable because an upstream dependency
+    failed is marked SKIPPED, never FAILED (see `task_graph.Scheduler.run`).
+    So this doesn't need to search for "true" roots among several
+    candidates -- it reads them directly off the run result, then maps each
+    one to the SKIPPED tasks it's a `failed_ancestors` of.
+    """
+    if run_result.all_succeeded:
+        return None
+
+    spans_by_task = {s.task_id: s for s in run_result.spans}
+    root_causes = sorted(run_result.failed)
+
+    blast_radius: Dict[str, List[str]] = {}
+    for root in root_causes:
+        dependents = [tid for tid in run_result.skipped
+                      if root in dag.failed_ancestors(tid, set(root_causes))]
+        blast_radius[root] = sorted(dependents)
+
+    failure_classes = {tid: classifier(spans_by_task[tid])
+                       for tid in root_causes if tid in spans_by_task}
+
+    orchestrator_originated = ROLE_REVIEWER_JUDGE in root_causes
+
+    if orchestrator_originated:
+        summary = (f"failure originated at the orchestrating role "
+                   f"({ROLE_REVIEWER_JUDGE}) itself, not cascaded from upstream")
+    elif root_causes:
+        total_downstream = sum(len(v) for v in blast_radius.values())
+        summary = (f"failure originated at {', '.join(root_causes)}, "
+                   f"cascading to {total_downstream} downstream task(s)")
+    else:
+        summary = "run did not fully succeed but no task actually failed (unexpected)"
+
+    return PipelineFailureDiagnosis(
+        root_cause_task_ids=root_causes,
+        blast_radius=blast_radius,
+        orchestrator_originated=orchestrator_originated,
+        failure_classes=failure_classes,
+        summary=summary,
+    )
+
+
+def resume_specialist_pipeline(
+    graph: ResearchGraph,
+    paper_id: str,
+    text: str,
+    previous_report: SpecialistPipelineReport,
+    extraction_type: ExtractionType = ExtractionType.CLAIMS,
+    gate: Optional[gates.WorkflowGate] = None,
+    worker: Optional[ReferenceWorker] = None,
+    confidence_floor: float = 0.0,
+    max_results: Optional[int] = None,
+    max_workers: int = 4,
+    classifier: Optional[Callable[[TaskSpan], str]] = None,
+    retryable_classes: Optional[Set[str]] = None,
+) -> SpecialistPipelineReport:
+    """
+    Resume a partially-failed specialist run, re-attempting only the stale
+    (FAILED/SKIPPED, and anything transitively depending on them) tasks --
+    not the whole four-role pipeline blindly. If nothing is stale (the
+    prior run fully succeeded, or has no run_result), returns
+    `previous_report` unchanged.
+
+    `classifier`/`retryable_classes` (both default None -- when either is
+    omitted, every stale task is retried, same as calling this with no
+    filtering at all): when both are supplied, each FAILED task's span is
+    classified and, if its class isn't in `retryable_classes`, that task
+    (and anything depending on it) is dropped from the retry set entirely
+    rather than blindly retried -- e.g. classify_specialist_failure's
+    "unsupported_extraction_type" is never worth retrying, since
+    extraction_type is fixed for the run.
+
+    Two concrete resume shapes exist in this DAG's actual failure surface:
+    if `extract` is stale, nothing else has valid output to reuse, so this
+    redoes the whole pipeline from scratch (via run_specialist_pipeline).
+    If only `reviewer_judge` is stale (the only other case this DAG's code
+    can currently produce -- conflict_check/schema_validate never raise on
+    valid input), only reviewer_judge re-runs, reusing the prior
+    extract/schema_validate/conflict_check verdicts and the prior envelope
+    untouched -- the worker is never re-invoked. Any other staleness
+    pattern (not producible by this DAG's code today, but not assumed
+    impossible either) falls back to a full re-run rather than guessing.
+    """
+    run_result = previous_report.run_result
+    if run_result is None or run_result.all_succeeded:
+        return previous_report
+
+    dag = _build_dag()
+    stale = resumable_tasks(dag, run_result)
+
+    if classifier is not None and retryable_classes is not None:
+        spans_by_task = {s.task_id: s for s in run_result.spans}
+        for task_id in list(stale):
+            span = spans_by_task.get(task_id)
+            if span is None or span.status != TaskStatus.FAILED.value:
+                continue
+            if classifier(span) not in retryable_classes:
+                _drop_downstream(dag, stale, task_id)
+
+    if not stale:
+        return previous_report
+
+    if "extract" in stale or stale != {"reviewer_judge"}:
+        return run_specialist_pipeline(
+            graph, paper_id, text, extraction_type, gate, worker,
+            confidence_floor, max_results, max_workers)
+
+    # Selective case: only reviewer_judge needs to re-run.
+    spawner = WorkerSpawner(graph, gate)
+    directive = ExtractionDirective(
+        job_id=previous_report.job_id, paper_id=paper_id,
+        extraction_type=extraction_type, target_node_type=PRODUCES_NODE_TYPE[extraction_type],
+        confidence_floor=confidence_floor, max_results=max_results,
+        gate_confidence_threshold=spawner.gate.confidence_threshold,
+    )
+    env = previous_report.envelope
+    schema_verdict = previous_report.verdict_for(ROLE_SCHEMA_VALIDATOR)
+    conflict_verdict = previous_report.verdict_for(ROLE_CONFLICT_CHECKER)
+    if env is None or schema_verdict is None or conflict_verdict is None:
+        # Selective resume is only reachable when extract/schema_validate/
+        # conflict_check all completed (stale == {"reviewer_judge"} exactly),
+        # which always populates these three -- a missing one here means
+        # previous_report wasn't actually produced by a real pipeline run.
+        raise ValueError(
+            "resume_specialist_pipeline: previous_report is missing envelope/"
+            "schema_validator/conflict_checker data required for a selective "
+            "reviewer_judge-only resume")
+    carried_verdicts = [v for v in previous_report.verdicts if v.role != ROLE_REVIEWER_JUDGE]
+
+    started = _now()
+    try:
+        admission, disagreements = reconcile_and_admit(
+            graph, spawner, directive, env, schema_verdict, conflict_verdict)
+    except Exception as exc:
+        span = TaskSpan(task_id="reviewer_judge", agent_id=ROLE_REVIEWER_JUDGE,
+                        parent_task_id=None, status=TaskStatus.FAILED.value,
+                        confidence=None, started_at=started, ended_at=_now(), error=repr(exc))
+        return SpecialistPipelineReport(
+            paper_id=paper_id, job_id=previous_report.job_id,
+            extraction_type=extraction_type.value, verdicts=carried_verdicts,
+            admission=None, disagreements=previous_report.disagreements,
+            run_result=RunResult(spans=[span], failed={"reviewer_judge"}),
+            envelope=env,
+        )
+
+    verdict = SpecialistVerdict(
+        role=ROLE_REVIEWER_JUDGE, passed=admission.admitted,
+        detail=(f"admitted {admission.nodes_admitted} node(s), "
+                f"status={admission.job_node.properties.get('status')}"),
+        evidence={"admitted": admission.admitted,
+                  "held_for_review": admission.review_task is not None,
+                  "disagreements": len(disagreements), "resumed": True},
+    )
+    span = TaskSpan(task_id="reviewer_judge", agent_id=ROLE_REVIEWER_JUDGE,
+                    parent_task_id=None, status=TaskStatus.COMPLETED.value,
+                    confidence=None, started_at=started, ended_at=_now())
+    return SpecialistPipelineReport(
+        paper_id=paper_id, job_id=previous_report.job_id,
+        extraction_type=extraction_type.value, verdicts=carried_verdicts + [verdict],
+        admission=admission, disagreements=previous_report.disagreements + disagreements,
+        run_result=RunResult(spans=[span], completed={"reviewer_judge"}),
+        envelope=env,
     )
 
 
