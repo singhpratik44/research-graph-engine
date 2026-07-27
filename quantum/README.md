@@ -28,6 +28,30 @@ parameters), not just internally self-consistent.
 | `code_search.py` | Pure search primitives — a bounded mutation operator over classical base codes and a `[[n,k,d]]`-based scoring heuristic — with an injectable mutation hook (the same pattern the main engine's `llm_worker.py` uses for its injectable `call_model`) so a real LLM-guided proposer could be swapped in without touching anything else. |
 | `autonomous_loop.py` | The actual self-optimizing system: a **sense → decide → optimize → verify → reconfigure** loop that autonomously searches for, verifies (via real Monte Carlo simulation, not just trusting the search score), and adopts better-performing codes over successive rounds, stopping itself once improvement stalls. |
 
+## GraphOps: a graph-native agentic quantum operating system
+
+A second layer built on top of the QEC machinery above, following this
+package's own "strongest build thesis": represent the quantum operation
+stack as a graph, then let other layers (routing, capability scoring, an
+agentic workflow) optimize over that graph. Six research pillars each map
+to one concrete, tested module:
+
+| Research pillar | Product module | What it does |
+|---|---|---|
+| Graph-constrained routing | `device_graph.py` + `routing.py` | `DeviceGraph`: a real qubit-connectivity graph (nodes, edges, per-qubit/edge noise) with BFS shortest path, diameter, and connectivity checks, plus `linear_chain`/`grid` constructors for the two topologies most real superconducting hardware ships as. `routing.py` directly compares **SWAP-based** routing (physically relocate the data qubit, hop by hop — exposed to both edge and per-qubit local error) against **teleportation-based** routing (one entangled pair per edge via entanglement swapping, charging only edge/entangling error, and never mutating the logical-to-physical mapping) over the same device and interaction list. |
+| Hardware-control frameworks | `hardware_control.py` | `HardwareControlAdapter`, a `Protocol` for `calibrate`/`apply_pulse`/`read_telemetry` — the three operations a real control stack (e.g. Qibolab-style pulse-level control) exposes — plus `SimulatedControlAdapter`, one honestly-simulated implementation that reaches no real hardware, tracking its own seedable, drifting noise model instead. The injection point mirrors `llm_worker.py`'s `call_model` and `autonomous_loop.py`'s `propose_mutation`. |
+| Capability modeling | `capability_router.py` | "What is my quantum computer good for?" made concrete: `stabilizer_interaction_graph()` derives the pairwise qubit-interaction requirements a CSS code's own stabilizers imply (a clique over each stabilizer's support), then `score_device_for_code()`/`recommend_device()` rank candidate devices by actually routing that requirement graph (reusing `routing.py`) rather than a hand-waved fit score. |
+| Autonomous stabilization | `autonomous_loop.py` (existing, reused) | The sense-decide-optimize-verify-reconfigure AQEC loop documented above — GraphOps' stage 1 input. |
+| Agentic quantum design | `workflow_engine.py` | Chains all of the above into one staged, autonomously-run pipeline — AQEC search → capability routing → physical-routing comparison → hardware calibration → Monte Carlo verification — producing a `WorkflowReport` with a structured, per-stage audit trail (not prose), echoing this repo's main engine's own workflow-gate discipline applied to a fully separate, physically-flavored pipeline. |
+| Graph-native ML (QGNN) | `graph_gnn.py` | A real Kipf & Welling GCN forward pass (symmetric-normalized adjacency, linear transform, activation) from scratch over pure Python floats — hand-verified against manually-computed small graphs. **Architecture only**: every weight is either hand-specified or drawn from a seedable RNG (`random_gcn_layer`), never learned. There is no training loop, loss function, or dataset here, and this module makes no claim otherwise. |
+
+`workflow_engine.run_graphops_workflow()` is the single entry point tying
+the whole thing together; see its docstring and `quickstart` below for a
+runnable example. Its stage 5 (verification) averages the calibrated
+device's per-qubit/edge error rates into one scalar `physical_error_rate`
+for `qec_simulation` — a real simplification of a real device's
+heterogeneous noise profile, stated plainly rather than hidden.
+
 ## Research provenance
 
 Three dedicated literature passes informed this module, each requiring
@@ -110,7 +134,7 @@ here for completeness, not built.
 ```bash
 cd quantum
 
-# run every test in this module (93 tests, ~13s -- some brute-force
+# run every test in this module (202 tests, ~13s -- some brute-force
 # distance/decoding searches are genuinely exponential in qubit count,
 # by construction; see css_codes.compute_distance's docstring)
 python3 -m unittest discover -p "test_*.py"
@@ -121,6 +145,10 @@ python3 -m mypy --ignore-missing-imports *.py
 # see the autonomous loop actually run, starting from a length-3
 # repetition code
 python3 autonomous_loop.py
+
+# run the full GraphOps pipeline: AQEC search -> capability routing ->
+# physical routing comparison -> calibration -> verification
+python3 workflow_engine.py
 ```
 
 ```python
@@ -155,3 +183,39 @@ print(css_codes.compute_distance(code))      # 3
 - `code_search.score_code()`'s `k * d / n` scoring heuristic is one
   simple, explicit choice for comparing candidates — not a claim that it's
   the objective real qLDPC code search should optimize.
+- `routing.py`'s cost model is simplified, said plainly: there is no real
+  entanglement-swapping protocol or real SWAP gate underneath it. What is
+  real is the structural distinction the literature draws between the two
+  strategies (SWAP-based routing exposes the data qubit's own local error
+  across every site it transits; teleportation-based routing does not),
+  which the module's error accounting reflects directly and its tests
+  check explicitly.
+- `capability_router.py` does not solve general graph embedding/subgraph
+  isomorphism (NP-hard) — it scores the simplest fair placement (a code's
+  qubits placed onto a device's own qubit ids in order) unless a caller
+  supplies a specific mapping to try instead.
+- `hardware_control.SimulatedControlAdapter` reaches **no real hardware**.
+  Its "calibration drift" is a seeded random perturbation of a static
+  starting noise model, not a measurement of anything physical.
+- `graph_gnn.py` is **architecture only** — a real, hand-verified GCN
+  forward pass with zero training. `random_gcn_layer`'s weights are drawn
+  from an RNG for demonstration shape, never learned from data.
+
+## Scope boundary: what this module is not
+
+A separate, much larger research direction was also explored in
+conversation but deliberately **not built here**: a "richer space" /
+"Quantum Control Intelligence Stack" spanning infinite-dimensional
+continuous-variable control (Banach–Lie controllability, boundary-control
+of quantum graphs), hardware-in-the-loop reinforcement learning (model-
+based and model-free), non-Markovian simulation (e.g. via QuTiP-BoFiN's
+hierarchical equations of motion), and a full governance/orchestration
+plane over real devices. That direction genuinely requires real external
+dependencies this package doesn't have (QuTiP, Qibolab, a graph database,
+an RL training stack), real hardware access this sandbox cannot reach, and
+a real training pipeline — building any piece of it "for real" without
+those would just be hollow scaffolding, which contradicts the honesty
+discipline the rest of this module holds itself to. Said plainly rather
+than quietly attempted: nothing under that heading is implemented in this
+package, and building it would be a substantial, separately-scoped effort
+requiring an explicit decision about which real dependencies to take on.
