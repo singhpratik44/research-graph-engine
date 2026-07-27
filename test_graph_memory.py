@@ -13,9 +13,10 @@ import unittest
 import golden_fixtures as gf
 import graph_memory as mem
 import research_graph_gates as gates
+import action_policy as ap
 from graph_queries import _to_gate_node
 from research_graph_schema import (
-    EdgeType, ExtractionMethod, MemoryKind, NodeType, ResearchGraph,
+    EdgeType, ExtractionMethod, ExtractionType, MemoryKind, NodeType, ResearchGraph,
     export_json_schema, validate_node,
 )
 from task_graph import TaskSpan
@@ -384,6 +385,49 @@ class TestReadFunctions(unittest.TestCase):
 # ===========================================================================
 # specialist_trust_scores / trust_score_for
 # ===========================================================================
+
+class TestRecordActionPolicyDecision(unittest.TestCase):
+    def _decision(self, verdict=ap.PolicyVerdict.BLOCKED):
+        action = ap.ProposedAction("paper_x", ExtractionType.CLAIMS)
+        return ap.PolicyDecision(verdict=verdict, reason="test reason",
+                                 rule_name="test_rule", action=action)
+
+    def test_records_without_requiring_subject_to_exist(self):
+        """A BLOCKED action never produces a node -- unlike every other
+        record_* function, subject_ref must NOT be required to already
+        exist in the graph."""
+        g = ResearchGraph()
+        node = mem.record_action_policy_decision(g, "action_synthetic_id", self._decision())
+        self.assertEqual(node.properties["memory_kind"], MemoryKind.ACTION_POLICY_DECISION.value)
+        self.assertEqual(node.properties["details"]["verdict"], "blocked")
+        self.assertTrue(g.validate().valid, g.validate().to_dict())
+        # No DERIVED_FROM edge, since the subject never existed.
+        self.assertEqual([e for e in g.edges if e.type == EdgeType.DERIVED_FROM.value], [])
+
+    def test_links_derived_from_when_subject_resolves_to_a_real_node(self):
+        g = _graph()
+        node = mem.record_action_policy_decision(
+            g, "job_2606_claims_001", self._decision(ap.PolicyVerdict.ALLOWED))
+        edges = [e for e in g.edges if e.type == EdgeType.DERIVED_FROM.value
+                and e.source == node.id]
+        self.assertEqual(len(edges), 1)
+        self.assertEqual(edges[0].target, "job_2606_claims_001")
+
+
+class TestActionPolicyDecisionsFor(unittest.TestCase):
+    def test_finds_recorded_decision(self):
+        g = ResearchGraph()
+        decision = ap.PolicyDecision(
+            verdict=ap.PolicyVerdict.ESCALATED, reason="r", rule_name="rule",
+            action=ap.ProposedAction("paper_x", ExtractionType.CLAIMS))
+        mem.record_action_policy_decision(g, "action_1", decision)
+        found = mem.action_policy_decisions_for(g, "action_1")
+        self.assertEqual(len(found), 1)
+
+    def test_no_recorded_decision_returns_empty(self):
+        g = ResearchGraph()
+        self.assertEqual(mem.action_policy_decisions_for(g, "nope"), [])
+
 
 class TestSpecialistTrustScores(unittest.TestCase):
     def test_role_whose_verdict_matched_the_eventual_outcome_gets_full_trust(self):

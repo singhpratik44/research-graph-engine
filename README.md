@@ -1,9 +1,21 @@
 # research-graph-engine
 
-A **governed workflow engine**: extract → gate → review → query, with every step
-traced and every gate decision auditable. Papers go in; validated, provenance-
-tracked claims and concepts come out — and nothing advances a stage without
-passing a deterministic gate that records *why*.
+A **governed workflow engine** with two distinct enforcement points, not one
+blurred into the other:
+
+- **Before an action runs** — `action_policy.py`'s `ActionPolicy` evaluates a
+  *proposed* extraction (which paper, which extraction type, at what confidence
+  floor) and returns allowed / escalated / blocked *before* any worker is
+  invoked. A blocked or escalated action never runs at all — not "runs, then
+  gets rejected later."
+- **After a claim is produced** — `research_graph_gates.py`'s `WorkflowGate`
+  evaluates the *already-extracted* claim/concept (schema, provenance, claim
+  entailment, confidence, human review, conflicts, downstream eligibility) and
+  decides whether it can advance, with every verdict traced back to a reason.
+
+Papers go in; validated, provenance-tracked claims and concepts come out — and
+nothing runs, and nothing it produces advances, without a decision that
+records *why*.
 
 Research literature is this repo's one worked example, not its ceiling. The
 same schema/gate/query/roadmap/eval pattern applies to anything shaped like
@@ -15,17 +27,20 @@ allowed through" has to be an answerable question, not a shrug.
 The point isn't the extraction. It's that every node in the graph can answer:
 who produced me, from what source, with what confidence, which checks did I
 pass, and if a human waived one of those checks — who, and on what grounds.
+And now, one step earlier: was the action that produced me even authorized to
+run in the first place, or did a human have to approve it first.
 
 ## The pipeline
 
 | Layer | File | What it does |
 |---|---|---|
 | Schema | `research_graph_schema.py` | Closed node/edge types, structured traces, validation with reason codes — not a bare bool |
+| Action policy | `action_policy.py` | Runtime, pre-execution enforcement: `ActionPolicy.authorize()` evaluates a proposed extraction *before* any worker runs, returning allowed/escalated/blocked from pluggable rules (`deny_extraction_types`, `require_escalation_for`, `max_results_ceiling`). `authorize_then_spawn()` is the actual enforcement point — a blocked or escalated action never spawns a job or invokes a worker; `approve_escalated_action()` is the only way an escalated one proceeds. Distinct from the gate below: this decides whether the extraction happens at all, not whether its output can advance |
 | Gate | `research_graph_gates.py` | `WorkflowGate.should_unlock_next_stage()` — seven deterministic checks (schema, provenance, claim entailment, confidence, human review, conflicts, downstream eligibility), every verdict traced |
 | Claim verification | `claim_verification.py` | `keyword_overlap_entailment_checker()` — pluggable into the gate's `_check_claim_entailed`; a claim citing a real source that doesn't actually support it now fails on `CLAIM_NOT_ENTAILED`, not just on hand-assigned low confidence. `atomic_entailment_checker()` decomposes a compound claim into clauses and requires the *weakest* one to clear the bar, so a single unsupported clause can't hide behind a well-supported one (`atomic_entailment_report()` exposes per-atom detail as a separate diagnostic) |
 | Workers | `research_graph_workers.py` | `ExtractionDirective` in, `ResultEnvelope` out; `WorkerSpawner` is the only writer to the graph, and treats every worker as untrusted. `ReferenceWorker` extracts claims, concepts, and benchmarks (deliberately dumb heuristics — proving the loop closes, not extraction quality). `admit()` supports a bounded, audited retry (`retry_with`/`max_retries`, default off) instead of failing a rejected envelope wholesale. `classify_rejection()` classifies a rejection into one of five broad failure classes, for a caller's own retry strategy to consult |
 | LLM worker | `llm_worker.py` | `LLMWorker` — a drop-in for `ReferenceWorker` backed by a real Claude API call instead of regex heuristics, satisfying the exact same envelope contract (`WorkerSpawner.admit()` doesn't know or care which produced it). `call_model` is injected (same pattern as `arxiv_ingest.py`'s `http_get`), so parsing/envelope logic is fully tested without a network call; the real call path needs `ANTHROPIC_API_KEY`, which this sandbox has never had, so it's written but not exercised end-to-end here — said plainly, not left implicit |
-| Graph memory | `graph_memory.py` | The other legitimate writer besides workers: persists task outcomes, accepted/rejected claims, reviewer disagreements, confidence divergence (derivation- vs. validation-time), blocked reasons, and repair patterns as typed `MEMORY_RECORD` nodes (`SUPPORTED_BY`/`REJECTED_BECAUSE`/`DISAGREED_ON`/`REPAIRED_VIA`/`DERIVED_FROM` edges) — structured graph data, not a flattened transcript. `specialist_trust_scores()` aggregates recorded disagreements into a per-role agreement/disagreement tally against each disputed node's own eventual outcome |
+| Graph memory | `graph_memory.py` | The other legitimate writer besides workers: persists task outcomes, accepted/rejected claims, reviewer disagreements, confidence divergence (derivation- vs. validation-time), action-policy decisions (audit evidence for `action_policy.py`), blocked reasons, and repair patterns as typed `MEMORY_RECORD` nodes (`SUPPORTED_BY`/`REJECTED_BECAUSE`/`DISAGREED_ON`/`REPAIRED_VIA`/`DERIVED_FROM` edges) — structured graph data, not a flattened transcript. `specialist_trust_scores()` aggregates recorded disagreements into a per-role agreement/disagreement tally against each disputed node's own eventual outcome |
 | Orchestrator | `graph_orchestrator.py` | Fan-out over one paper to the claim/concept/benchmark extractors, collected into one `OrchestrationReport` — schema validation, conflict detection, and the gate decision all still happen inside the *unchanged* `WorkerSpawner.admit()`, not duplicated here |
 | Specialist agent split | `specialist_review.py` | Four bounded roles (extractor, schema validator, conflict checker, reviewer/judge) run as an explicit `task_graph.TaskDAG` (`extract` → `{conflict_check, schema_validate}` in parallel → `reviewer_judge`), each an independent, always-completed `SpecialistVerdict`, reconciled into one `SpecialistPipelineReport` — multi-dimensional review instead of one scalar `ReviewStatus`/confidence, without touching the gate itself; disagreement between specialists is persisted via `graph_memory.record_disagreement` before the real, unchanged `WorkerSpawner.admit()` runs. `resume_specialist_pipeline()` resumes only the stale (failed/skipped) tasks after a partial failure instead of redoing the whole pipeline, optionally filtered by `classify_specialist_failure()`'s failure class |
 | Conflict detection | `research_graph_schema.detect_conflicts_in_graph()` | Deterministic heuristics first — same subject/object, opposed relation |
@@ -71,6 +86,10 @@ make roadmap             # == python3 graph_roadmap.py
 
 # check quality, not just correctness
 make evals               # == python3 graph_evals.py
+
+# authorize a proposed extraction BEFORE any worker runs -- allowed/
+# escalated/blocked, with a blocked or escalated action never spawning
+python3 action_policy.py
 
 # fan a paper out to claim/concept/benchmark extraction, gated as normal
 python3 graph_orchestrator.py

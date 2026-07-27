@@ -51,13 +51,20 @@ human carried out by hand -- it does not require the retry loop to exist.
 
 import hashlib
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from research_graph_schema import (
     Edge, EdgeType, ExtractionMethod, MemoryKind, Node, NodeType, Provenance,
     ResearchGraph,
 )
 import research_graph_gates as gates
+
+if TYPE_CHECKING:
+    # Type-checking only -- action_policy.py imports this module directly
+    # (to call record_action_policy_decision), so a real import here would
+    # be circular. This has zero runtime effect; it exists only so mypy
+    # can resolve the "action_policy.PolicyDecision" forward reference.
+    import action_policy
 
 try:
     from task_graph import TaskSpan
@@ -298,6 +305,53 @@ def confidence_divergence_for(graph: ResearchGraph, node_id: str) -> List[Node]:
                 MemoryKind.CONFIDENCE_DIVERGENCE.value:
             out.append(record)
     return out
+
+
+def record_action_policy_decision(
+    graph: ResearchGraph,
+    subject_ref: str,
+    decision: "action_policy.PolicyDecision",
+) -> Node:
+    """
+    Persist a runtime action_policy.ActionPolicy decision (ALLOWED/
+    ESCALATED/BLOCKED) as durable audit evidence -- the audit-trail half
+    of runtime policy enforcement, not just the allow/block decision
+    itself.
+
+    Unlike every other record_* function in this module, `subject_ref`
+    does NOT need to already resolve to a graph node: a BLOCKED action, by
+    definition, never produces one (the worker is never invoked, so
+    there's nothing to point at). When `subject_ref` does resolve to a
+    real node (the common case: the job that got authorized to spawn),
+    a DERIVED_FROM edge links the audit record to it, same as
+    `record_task_outcome`'s conditional edge; otherwise the record still
+    lands, just without a dangling edge to a node that was never there.
+    """
+    summary = f"{subject_ref}: {decision.verdict.value} ({decision.rule_name}) -- {decision.reason}"
+    node = _memory_node(
+        kind=MemoryKind.ACTION_POLICY_DECISION,
+        subject_ref=subject_ref,
+        summary=summary,
+        confidence=None,
+        source_paper=subject_ref,
+        human_reviewed=False,
+        review_notes=decision.reason,
+        details=decision.to_dict(),
+    )
+    graph.nodes.append(node)
+    if subject_ref in graph.index():
+        graph.edges.append(Edge(source=node.id, target=subject_ref,
+                                 type=EdgeType.DERIVED_FROM.value, provenance=node.provenance))
+    return node
+
+
+def action_policy_decisions_for(graph: ResearchGraph, subject_ref: str) -> List[Node]:
+    """Every ACTION_POLICY_DECISION memory record about `subject_ref` (an action
+    id or a job id) -- filters by memory_kind since subject_ref match alone
+    (unlike an edge type) is already specific to this kind by construction
+    of memory_records_for, but this wraps that pattern for readability."""
+    return [n for n in memory_records_for(graph, subject_ref)
+            if n.properties.get("memory_kind") == MemoryKind.ACTION_POLICY_DECISION.value]
 
 
 def record_blocked_reason(graph: ResearchGraph, gate_decision: "gates.GateDecision") -> Node:

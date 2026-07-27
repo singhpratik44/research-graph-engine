@@ -231,6 +231,32 @@ moves to the next item after `make validate` is green and a human has merged.
     enum ahead of a real producer would be premature.
 
   Full suite: 493 tests passing.
+- **Runtime action-policy enforcement** (`action_policy.py`, new module;
+  ad hoc, not part of the sequenced roadmap — a research pass on
+  "runtime policy enforcement for autonomous agents" surfaced a real
+  architectural gap this closes). Every existing check in this repo
+  (`WorkflowGate`, the specialist verdicts) evaluates a claim/node
+  *after* a worker already produced it — post-hoc data validation, not
+  runtime action enforcement. `ActionPolicy.authorize()` evaluates a
+  *proposed* extraction (paper_id, extraction_type, confidence_floor,
+  max_results) before any worker is invoked, returning ALLOWED /
+  ESCALATED / BLOCKED from pluggable rules. `authorize_then_spawn()` is
+  the actual enforcement point: only ALLOWED spawns immediately — both
+  ESCALATED and BLOCKED hold the action, no job node created, no worker
+  invoked. `approve_escalated_action()` is the only way an escalated
+  action proceeds (a human decision, not automatic); a BLOCKED one
+  can't be approved past at all (`ValueError` if attempted) — the
+  policy said no, not "ask a human." One new `MemoryKind` member
+  (`ACTION_POLICY_DECISION`, schema `3.2.0` → `3.3.0`) persists every
+  decision as durable audit evidence via `graph_memory
+  .record_action_policy_decision`/`action_policy_decisions_for`,
+  linked to the real job node when one exists (a blocked action, by
+  definition, has none to link to). Purely additive:
+  `research_graph_workers.py`, `research_graph_gates.py`,
+  `specialist_review.py` are all unmodified — this only calls
+  `WorkerSpawner.spawn()` and the new `graph_memory` function.
+
+  Full suite: 517 tests passing.
 
 ## Next
 
