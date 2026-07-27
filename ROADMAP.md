@@ -189,6 +189,48 @@ moves to the next item after `make validate` is green and a human has merged.
 
   Full suite: 460 tests passing; `make typecheck` clean across all 41
   modules.
+- Four more literature-informed engine improvements (ad hoc, not part of
+  the sequenced roadmap — same posture as the two rounds above: this came
+  from a dedicated research pass over 10 more real studies/papers from the
+  last ~3 months, not from working the backlog in order). All four are
+  purely additive; every pre-existing test passes unmodified.
+  - **Confidence divergence** (`graph_memory.record_confidence_divergence`/
+    `confidence_divergence_for`; `specialist_review.check_confidence_
+    divergence`, wired into `run_specialist_pipeline`'s new
+    `divergence_threshold=None` param). A claim's confidence at first
+    derivation vs. a later re-validation can drift; three independent
+    papers converge on treating that drift as a first-class signal
+    instead of silently overwriting the old reading. One new `MemoryKind`
+    member (`CONFIDENCE_DIVERGENCE`, schema `3.1.0` → `3.2.0`) — zero
+    `NODE_SCHEMA` structural change, since `memory_kind` was already
+    enum-validated.
+  - **Selective failure-class recovery** (`specialist_review
+    .resumable_tasks`/`classify_specialist_failure`/
+    `resume_specialist_pipeline`). Today a failed extraction cascades
+    SKIPPED to all three other specialist tasks, and any retry redoes the
+    whole four-role pipeline; two papers converge on selective,
+    failure-class-driven recovery instead. Resuming only re-attempts
+    stale tasks — if only `reviewer_judge` failed (the one partial
+    pattern this DAG's code can actually produce), only it re-runs,
+    reusing the prior envelope and verdicts without re-invoking the
+    worker. Explicitly rejected: exposing `Scheduler`'s retry knobs
+    across the whole DAG, since a naive blind retry risked a
+    double-admission if `admit()` were ever reachable twice.
+  - **Specialist trust scores** (`graph_memory.specialist_trust_scores`/
+    `trust_score_for`). Aggregates every recorded reviewer disagreement
+    into a per-role agreement/disagreement tally against the disputed
+    node's own eventual outcome — no new signed-edge schema, since the
+    ground truth for "who was right" already lives in the graph. An
+    outcome that's still undecided never falsely counts as a
+    disagreement.
+  - **Derivation-mechanism classification** (`graph_queries
+    .derivation_mechanism_for`/`derivation_mechanism_breakdown`). The
+    thinnest-evidence feature of the four (single paper) — deliberately
+    built as plain classification strings from existing node data, not a
+    new `ExtractionMethod` schema member, since committing a new closed
+    enum ahead of a real producer would be premature.
+
+  Full suite: 493 tests passing.
 
 ## Next
 
