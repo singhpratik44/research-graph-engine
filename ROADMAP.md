@@ -266,6 +266,59 @@ moves to the next item after `make validate` is green and a human has merged.
   `WorkerSpawner.spawn()` and the new `graph_memory` function.
 
   Full suite: 517 tests passing.
+- **Three literature-informed hardening improvements** (ad hoc, not part of
+  the sequenced roadmap — a research pass across robustness, graph-theory,
+  and agentic-architecture lenses, scoped against everything already built
+  this project, surfaced these as the three candidates with genuine
+  multi-paper convergence and a clean fit to an existing module; weaker,
+  single-paper or extrapolated candidates from the same pass were
+  deliberately left undone). All three are purely additive.
+  - **Closed-loop (post-execution) action-policy enforcement**
+    (`action_policy.py`'s `ExecutionOutcome`/`authorize_outcome()`/
+    `authorize_execute_then_admit()`/`approve_escalated_outcome()`).
+    `authorize_then_spawn()` alone only ever authorizes a *declared*
+    action before it runs — GAAT (arXiv 2604.05119) names exactly this
+    "observe-but-do-not-act" gap in real agent telemetry.
+    `authorize_execute_then_admit()` runs the worker only if the
+    pre-action check is ALLOWED, then re-authorizes the *realized*
+    outcome (`block_low_average_confidence_outcome`,
+    `max_nodes_produced_ceiling`, `escalate_on_worker_failure`) before
+    `spawner.admit()` is ever called — a worker's side effects can't be
+    undone, but a blocked/escalated outcome never reaches the graph.
+    `approve_escalated_outcome()` admits an already-produced, held
+    envelope without re-invoking the worker. `authorize_then_spawn`/
+    `approve_escalated_action` are both unchanged.
+  - **Trajectory-level failure diagnosis** (`specialist_review
+    .diagnose_pipeline_failure`/`PipelineFailureDiagnosis`). VerifyMAS and
+    "Recognize Your Orchestrator" (ICML 2026) both find per-task failure
+    classification misses errors that only show up across a DAG's full
+    trajectory, and that failures concentrate at the orchestrating role
+    (here, `reviewer_judge`) rather than uniformly across executors.
+    `diagnose_pipeline_failure()` reads root-cause task(s), blast radius,
+    and whether the failure originated at `reviewer_judge` itself
+    directly off an already-completed `RunResult` — advisory only, it
+    never changes what `resume_specialist_pipeline` retries.
+    `classify_specialist_failure`/`resume_specialist_pipeline` are both
+    unchanged.
+  - **Provenance-bound trust + governed retraction** (`graph_memory
+    .provenance_trust_weight_for`/`provenance_bound_confidence`/
+    `provenance_weighted_trust_scores`; `retract_memory_record`/
+    `is_retracted`/`active_memory_records_for`). Two independent 2026
+    papers (a long-term agent-memory-security survey and a
+    provenance-capped belief-updating paper) converge on capping trust
+    by source provenance rather than a source's own self-reported
+    confidence, and on treating "Forget & Rollback" as a first-class,
+    security-relevant lifecycle phase this repo's `MemoryKind` enum
+    previously had no analog for (schema `3.3.0` → `3.4.0`, one new
+    member: `MEMORY_RETRACTED`). `provenance_weighted_trust_scores` is a
+    new, parallel aggregation to `specialist_trust_scores` — the latter
+    is otherwise unchanged in its own arithmetic, and now additionally
+    skips retracted disagreements (a no-op for any graph that never
+    retracts one). Retraction is itself a new, append-only memory record
+    linked back to what it retracts — never a deletion or in-place edit.
+
+  Full suite: 568 tests passing; `make typecheck` clean across all 43
+  modules.
 
 ## Next
 

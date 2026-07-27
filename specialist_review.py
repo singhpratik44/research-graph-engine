@@ -484,6 +484,94 @@ def classify_specialist_failure(span: TaskSpan) -> str:
                                           # something worth a blind retry
 
 
+@dataclass
+class PipelineFailureDiagnosis:
+    """
+    Trajectory-level failure diagnosis over one whole specialist-pipeline
+    run, not one task's local status in isolation. VerifyMAS and "Recognize
+    Your Orchestrator" (ICML 2026) both find that per-task/per-log failure
+    classification misses errors that only show up across a DAG's full
+    execution trajectory, and that failures concentrate at the
+    orchestrating role (here, reviewer_judge -- the role that reconciles
+    both parallel branches and commits) rather than uniformly across
+    executor roles. This is advisory, read-only diagnosis over an already-
+    completed RunResult: it never changes what `resume_specialist_pipeline`
+    retries, only what a caller can learn about *why* a run failed as a
+    whole, in addition to `classify_specialist_failure`'s per-span view.
+    """
+    root_cause_task_ids: List[str]
+    blast_radius: Dict[str, List[str]]  # root task_id -> skipped tasks it caused
+    orchestrator_originated: bool       # did reviewer_judge itself fail, vs. cascade from upstream
+    failure_classes: Dict[str, str]     # root task_id -> classify_specialist_failure() label
+    summary: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "root_cause_task_ids": self.root_cause_task_ids,
+            "blast_radius": self.blast_radius,
+            "orchestrator_originated": self.orchestrator_originated,
+            "failure_classes": self.failure_classes,
+            "summary": self.summary,
+        }
+
+
+def diagnose_pipeline_failure(
+    dag: TaskDAG,
+    run_result: RunResult,
+    classifier: Callable[[TaskSpan], str] = classify_specialist_failure,
+) -> Optional[PipelineFailureDiagnosis]:
+    """
+    Trajectory-level diagnosis over a whole run: which task(s) actually
+    failed (as opposed to merely cascading SKIPPED because they depended on
+    one that did), how far the resulting blast radius reached, whether the
+    orchestrating role (reviewer_judge) itself originated the failure, and
+    each root cause's failure class. Returns `None` if the run fully
+    succeeded -- there is nothing to diagnose.
+
+    `run_result.failed` IS the root-cause set here: `Scheduler` only ever
+    marks a task FAILED when it actually ran its executor and that raised;
+    every task that becomes unreachable because an upstream dependency
+    failed is marked SKIPPED, never FAILED (see `task_graph.Scheduler.run`).
+    So this doesn't need to search for "true" roots among several
+    candidates -- it reads them directly off the run result, then maps each
+    one to the SKIPPED tasks it's a `failed_ancestors` of.
+    """
+    if run_result.all_succeeded:
+        return None
+
+    spans_by_task = {s.task_id: s for s in run_result.spans}
+    root_causes = sorted(run_result.failed)
+
+    blast_radius: Dict[str, List[str]] = {}
+    for root in root_causes:
+        dependents = [tid for tid in run_result.skipped
+                      if root in dag.failed_ancestors(tid, set(root_causes))]
+        blast_radius[root] = sorted(dependents)
+
+    failure_classes = {tid: classifier(spans_by_task[tid])
+                       for tid in root_causes if tid in spans_by_task}
+
+    orchestrator_originated = ROLE_REVIEWER_JUDGE in root_causes
+
+    if orchestrator_originated:
+        summary = (f"failure originated at the orchestrating role "
+                   f"({ROLE_REVIEWER_JUDGE}) itself, not cascaded from upstream")
+    elif root_causes:
+        total_downstream = sum(len(v) for v in blast_radius.values())
+        summary = (f"failure originated at {', '.join(root_causes)}, "
+                   f"cascading to {total_downstream} downstream task(s)")
+    else:
+        summary = "run did not fully succeed but no task actually failed (unexpected)"
+
+    return PipelineFailureDiagnosis(
+        root_cause_task_ids=root_causes,
+        blast_radius=blast_radius,
+        orchestrator_originated=orchestrator_originated,
+        failure_classes=failure_classes,
+        summary=summary,
+    )
+
+
 def resume_specialist_pipeline(
     graph: ResearchGraph,
     paper_id: str,

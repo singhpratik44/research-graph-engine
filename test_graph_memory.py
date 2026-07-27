@@ -16,8 +16,8 @@ import research_graph_gates as gates
 import action_policy as ap
 from graph_queries import _to_gate_node
 from research_graph_schema import (
-    EdgeType, ExtractionMethod, ExtractionType, MemoryKind, NodeType, ResearchGraph,
-    export_json_schema, validate_node,
+    EdgeType, ExtractionMethod, ExtractionType, MemoryKind, Node, NodeType, Provenance,
+    ResearchGraph, export_json_schema, validate_node,
 )
 from task_graph import TaskSpan
 
@@ -462,6 +462,169 @@ class TestSpecialistTrustScores(unittest.TestCase):
     def test_unknown_role_returns_none_not_a_key_error(self):
         g = _graph()
         self.assertIsNone(mem.trust_score_for(g, "nobody_ever_recorded"))
+
+
+# ===========================================================================
+# provenance_trust_weight_for / provenance_bound_confidence
+# ===========================================================================
+
+class TestProvenanceTrustWeight(unittest.TestCase):
+    def test_human_annotation_gets_full_weight(self):
+        node = Node("n1", "claim", "x",
+                    Provenance("p", ExtractionMethod.HUMAN_ANNOTATION.value, 0.9, "t"))
+        self.assertEqual(mem.provenance_trust_weight_for(node), 1.0)
+
+    def test_memory_write_gets_a_low_weight(self):
+        node = Node("n1", "claim", "x",
+                    Provenance("p", ExtractionMethod.MEMORY_WRITE.value, 0.9, "t"))
+        self.assertEqual(mem.provenance_trust_weight_for(node), 0.3)
+
+    def test_missing_provenance_gets_the_conservative_default_not_full_trust(self):
+        node = Node("n1", "claim", "x", None)
+        self.assertEqual(mem.provenance_trust_weight_for(node),
+                          mem._DEFAULT_PROVENANCE_TRUST_WEIGHT)
+
+    def test_unmapped_extraction_method_gets_the_conservative_default(self):
+        node = Node("n1", "claim", "x", Provenance("p", "some_future_method", 0.9, "t"))
+        self.assertEqual(mem.provenance_trust_weight_for(node),
+                          mem._DEFAULT_PROVENANCE_TRUST_WEIGHT)
+
+
+class TestProvenanceBoundConfidence(unittest.TestCase):
+    def test_caps_self_reported_confidence_by_source_weight(self):
+        node = Node("n1", "claim", "x",
+                    Provenance("p", ExtractionMethod.STRUCTURED_LLM.value, 0.9, "t"))
+        self.assertAlmostEqual(mem.provenance_bound_confidence(node), 0.63)  # 0.9 * 0.7
+
+    def test_human_annotation_confidence_is_effectively_unbounded(self):
+        node = Node("n1", "claim", "x",
+                    Provenance("p", ExtractionMethod.HUMAN_ANNOTATION.value, 0.9, "t"))
+        self.assertAlmostEqual(mem.provenance_bound_confidence(node), 0.9)
+
+    def test_no_confidence_reading_returns_none_not_zero(self):
+        node = Node("n1", "claim", "x",
+                    Provenance("p", ExtractionMethod.HUMAN_ANNOTATION.value, None, "t"))
+        self.assertIsNone(mem.provenance_bound_confidence(node))
+
+
+# ===========================================================================
+# provenance_weighted_trust_scores
+# ===========================================================================
+
+class TestProvenanceWeightedTrustScores(unittest.TestCase):
+    def test_weight_matches_the_disputed_nodes_own_provenance(self):
+        # job_2606_claims_001's provenance defaults to ExtractionMethod.JOB_SPAWN
+        # (weight 0.3, golden_fixtures._prov's default) and its status is
+        # completed -- schema_validator's "pass" verdict matches that outcome.
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        scores = mem.provenance_weighted_trust_scores(g)
+        self.assertAlmostEqual(scores["schema_validator"]["weighted_agreements"], 0.3)
+        self.assertAlmostEqual(scores["schema_validator"]["weighted_trust_score"], 1.0)
+        self.assertAlmostEqual(scores["conflict_checker"]["weighted_disagreements"], 0.3)
+        self.assertAlmostEqual(scores["conflict_checker"]["weighted_trust_score"], 0.0)
+
+    def test_does_not_change_specialist_trust_scores_own_arithmetic(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_claims_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        flat = mem.specialist_trust_scores(g)
+        self.assertEqual(flat["schema_validator"]["agreements"], 1)
+        self.assertAlmostEqual(flat["schema_validator"]["trust_score"], 1.0)
+
+    def test_undecided_outcome_is_not_weighted_either_way(self):
+        g = _graph()
+        mem.record_disagreement(g, "job_2606_concepts_001",
+                                reviewer_a="schema_validator", verdict_a="pass",
+                                reviewer_b="conflict_checker", verdict_b="fail")
+        scores = mem.provenance_weighted_trust_scores(g)
+        self.assertEqual(scores["schema_validator"]["undecided"], 1)
+        self.assertIsNone(scores["schema_validator"]["weighted_trust_score"])
+
+
+# ===========================================================================
+# retract_memory_record / is_retracted / active_memory_records_for
+# ===========================================================================
+
+class TestRetractMemoryRecord(unittest.TestCase):
+    def test_retraction_links_derived_from_and_validates(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        retraction = mem.retract_memory_record(g, record.id, retracted_by="carol",
+                                               reason="source later found poisoned")
+        self.assertEqual(retraction.properties["memory_kind"], MemoryKind.MEMORY_RETRACTED.value)
+        derived = [e for e in g.edges if e.type == EdgeType.DERIVED_FROM.value
+                   and e.source == retraction.id]
+        self.assertEqual(len(derived), 1)
+        self.assertEqual(derived[0].target, record.id)
+        self.assertTrue(g.validate().valid, g.validate().to_dict())
+
+    def test_unknown_record_id_raises(self):
+        g = _graph()
+        with self.assertRaises(KeyError):
+            mem.retract_memory_record(g, "no_such_record", "carol", "reason")
+
+    def test_non_memory_record_node_raises(self):
+        g = _graph()
+        with self.assertRaises(ValueError):
+            mem.retract_memory_record(g, "job_2606_claims_001", "carol", "reason")
+
+    def test_original_record_is_never_mutated(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        original_props = dict(record.properties)
+        mem.retract_memory_record(g, record.id, "carol", "reason")
+        self.assertEqual(record.properties, original_props)
+
+
+class TestIsRetracted(unittest.TestCase):
+    def test_false_before_retraction(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        self.assertFalse(mem.is_retracted(g, record.id))
+
+    def test_true_after_retraction(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        mem.retract_memory_record(g, record.id, "carol", "reason")
+        self.assertTrue(mem.is_retracted(g, record.id))
+
+    def test_unrelated_derived_from_edge_does_not_falsely_flag_retraction(self):
+        """A CONFIDENCE_DIVERGENCE record also uses DERIVED_FROM -- retraction
+        detection must filter by memory_kind, not just edge type/target."""
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        mem.record_confidence_divergence(g, "job_2606_claims_001", 0.5, 0.9)
+        self.assertFalse(mem.is_retracted(g, record.id))
+
+
+class TestActiveMemoryRecordsFor(unittest.TestCase):
+    def test_excludes_retracted_records(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        mem.retract_memory_record(g, record.id, "carol", "reason")
+        active = mem.active_memory_records_for(g, "job_2606_claims_001")
+        self.assertNotIn(record, active)
+
+    def test_includes_non_retracted_records(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001", "alice", "accept", "bob", "reject")
+        active = mem.active_memory_records_for(g, "job_2606_claims_001")
+        self.assertIn(record, active)
+
+
+class TestRetractionExcludedFromTrustScores(unittest.TestCase):
+    def test_retracted_disagreement_no_longer_counts(self):
+        g = _graph()
+        record = mem.record_disagreement(g, "job_2606_claims_001",
+                                         reviewer_a="schema_validator", verdict_a="pass",
+                                         reviewer_b="conflict_checker", verdict_b="fail")
+        mem.retract_memory_record(g, record.id, "carol", "source later found poisoned")
+        self.assertNotIn("schema_validator", mem.specialist_trust_scores(g))
+        self.assertNotIn("schema_validator", mem.provenance_weighted_trust_scores(g))
 
 
 # ===========================================================================

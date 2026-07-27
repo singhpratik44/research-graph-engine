@@ -21,7 +21,7 @@ from enum import Enum
 from datetime import datetime, timezone
 import json
 
-SCHEMA_VERSION = "3.3.0"
+SCHEMA_VERSION = "3.4.0"
 
 
 # ============================================================================
@@ -154,6 +154,7 @@ class MemoryKind(str, Enum):
     REPAIR_PATTERN = "repair_pattern"              # how a rejected/blocked item got fixed
     CONFIDENCE_DIVERGENCE = "confidence_divergence"  # derivation- vs validation-time confidence gap
     ACTION_POLICY_DECISION = "action_policy_decision"  # a runtime ActionPolicy allow/escalate/block verdict
+    MEMORY_RETRACTED = "memory_retracted"           # a prior memory record was retracted ("forget/rollback")
 
 
 def _now() -> str:

@@ -405,6 +405,86 @@ class TestResumableTasks(unittest.TestCase):
         self.assertEqual(sr.resumable_tasks(dag, run_result), {"reviewer_judge"})
 
 
+class TestDiagnosePipelineFailure(unittest.TestCase):
+    def _span(self, task_id, status, error=""):
+        return TaskSpan(task_id=task_id, agent_id="a", parent_task_id=None,
+                        status=status, confidence=None,
+                        started_at="2026-07-27T00:00:00+00:00", error=error)
+
+    def test_fully_succeeded_run_returns_none(self):
+        dag = sr._build_dag()
+        run_result = RunResult(completed={"extract", "conflict_check",
+                                          "schema_validate", "reviewer_judge"})
+        self.assertIsNone(sr.diagnose_pipeline_failure(dag, run_result))
+
+    def test_extract_failure_cascade_is_not_orchestrator_originated(self):
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"extract"},
+            skipped={"conflict_check", "schema_validate", "reviewer_judge"},
+            spans=[self._span("extract", TaskStatus.FAILED.value, error="RuntimeError('boom')")],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(dag, run_result)
+        self.assertEqual(diagnosis.root_cause_task_ids, ["extract"])
+        self.assertEqual(diagnosis.blast_radius["extract"],
+                         sorted(["conflict_check", "schema_validate", "reviewer_judge"]))
+        self.assertFalse(diagnosis.orchestrator_originated)
+        self.assertEqual(diagnosis.failure_classes["extract"], "worker_reported_failure")
+        self.assertIn("extract", diagnosis.summary)
+
+    def test_reviewer_judge_failure_alone_is_orchestrator_originated(self):
+        """No downstream tasks to skip -- reviewer_judge has no dependents in
+        this DAG -- but the failure still originated at the orchestrating
+        role itself, which the diagnosis must surface distinctly from a
+        cascade."""
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"reviewer_judge"},
+            spans=[self._span("reviewer_judge", TaskStatus.FAILED.value, error="KeyError('nope')")],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(dag, run_result)
+        self.assertEqual(diagnosis.root_cause_task_ids, ["reviewer_judge"])
+        self.assertEqual(diagnosis.blast_radius["reviewer_judge"], [])
+        self.assertTrue(diagnosis.orchestrator_originated)
+        self.assertIn("orchestrating role", diagnosis.summary)
+
+    def test_custom_classifier_is_used_for_root_causes(self):
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"extract"},
+            skipped={"conflict_check", "schema_validate", "reviewer_judge"},
+            spans=[self._span("extract", TaskStatus.FAILED.value, error="boom")],
+        )
+        diagnosis = sr.diagnose_pipeline_failure(
+            dag, run_result, classifier=lambda span: "custom_label")
+        self.assertEqual(diagnosis.failure_classes["extract"], "custom_label")
+
+    def test_to_dict_is_json_shaped(self):
+        dag = sr._build_dag()
+        run_result = RunResult(
+            failed={"extract"},
+            skipped={"conflict_check", "schema_validate", "reviewer_judge"},
+            spans=[self._span("extract", TaskStatus.FAILED.value, error="boom")],
+        )
+        d = sr.diagnose_pipeline_failure(dag, run_result).to_dict()
+        self.assertEqual(d["root_cause_task_ids"], ["extract"])
+        self.assertIn("blast_radius", d)
+        self.assertIn("failure_classes", d)
+        self.assertIn("summary", d)
+
+    def test_diagnoses_a_real_scheduler_produced_run_result(self):
+        """Same real DAG, same real Scheduler run this module's own
+        end-to-end tests exercise -- not just a hand-built RunResult."""
+        graph = ResearchGraph()
+        report = sr.run_specialist_pipeline(graph, PAPER, "text",
+                                            extraction_type=ExtractionType.METHODS)
+        diagnosis = sr.diagnose_pipeline_failure(sr._build_dag(), report.run_result)
+        self.assertEqual(diagnosis.root_cause_task_ids, ["extract"])
+        self.assertFalse(diagnosis.orchestrator_originated)
+        self.assertEqual(set(diagnosis.blast_radius["extract"]),
+                         {"conflict_check", "schema_validate", "reviewer_judge"})
+
+
 class TestClassifySpecialistFailure(unittest.TestCase):
     def _span(self, task_id, status=TaskStatus.FAILED.value, error=""):
         return TaskSpan(task_id=task_id, agent_id="a", parent_task_id=None,
