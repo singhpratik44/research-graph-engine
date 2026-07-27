@@ -16,7 +16,7 @@ from research_graph_schema import (
 )
 import research_graph_gates as gates
 from research_graph_workers import ReferenceWorker, ResultEnvelope, WorkerSpawner
-from task_graph import TaskStatus
+from task_graph import RunResult, TaskSpan, TaskStatus
 import graph_memory
 import specialist_review as sr
 
@@ -379,6 +379,149 @@ class TestRunSpecialistPipelineEndToEnd(unittest.TestCase):
         self.assertTrue(second.has_confidence_divergence)
         record = second.confidence_divergences[0]
         self.assertAlmostEqual(record.properties["details"]["derivation_confidence"], 0.05)
+
+
+# ============================================================================
+# Selective failure-class recovery
+# ============================================================================
+
+class TestResumableTasks(unittest.TestCase):
+    def test_failed_and_skipped_are_stale(self):
+        dag = sr._build_dag()
+        run_result = RunResult(failed={"extract"},
+                               skipped={"conflict_check", "schema_validate", "reviewer_judge"})
+        self.assertEqual(sr.resumable_tasks(dag, run_result),
+                         {"extract", "conflict_check", "schema_validate", "reviewer_judge"})
+
+    def test_downstream_of_a_stale_task_is_also_stale(self):
+        dag = sr._build_dag()
+        run_result = RunResult(failed={"extract"})
+        self.assertEqual(sr.resumable_tasks(dag, run_result),
+                         {"extract", "conflict_check", "schema_validate", "reviewer_judge"})
+
+    def test_task_with_no_stale_dependency_is_not_marked_stale(self):
+        dag = sr._build_dag()
+        run_result = RunResult(failed={"reviewer_judge"})
+        self.assertEqual(sr.resumable_tasks(dag, run_result), {"reviewer_judge"})
+
+
+class TestClassifySpecialistFailure(unittest.TestCase):
+    def _span(self, task_id, status=TaskStatus.FAILED.value, error=""):
+        return TaskSpan(task_id=task_id, agent_id="a", parent_task_id=None,
+                        status=status, confidence=None,
+                        started_at="2026-07-27T00:00:00+00:00", error=error)
+
+    def test_unsupported_extraction_type(self):
+        span = self._span("extract", error="RuntimeError('unsupported extraction_type methods')")
+        self.assertEqual(sr.classify_specialist_failure(span), "unsupported_extraction_type")
+
+    def test_other_extract_failure_is_worker_reported(self):
+        span = self._span("extract", error="RuntimeError('boom')")
+        self.assertEqual(sr.classify_specialist_failure(span), "worker_reported_failure")
+
+    def test_non_extract_failure_is_specialist_internal_error(self):
+        span = self._span("reviewer_judge", error="KeyError('nope')")
+        self.assertEqual(sr.classify_specialist_failure(span), "specialist_internal_error")
+
+    def test_non_failed_span_is_unclassified(self):
+        span = self._span("extract", status=TaskStatus.COMPLETED.value)
+        self.assertEqual(sr.classify_specialist_failure(span), "unclassified")
+
+
+class _AlwaysFailsWorker:
+    def run(self, directive, text):
+        return ResultEnvelope(directive.job_id, "flaky_worker", worker_status="failed",
+                              error="simulated transient failure")
+
+
+class TestResumeSpecialistPipeline(unittest.TestCase):
+    TEXT = "Hierarchical orchestration reduces coordination overhead."
+
+    def _completed_up_to_reviewer_judge(self, graph):
+        """Build a previous_report as if extract/schema_validate/conflict_check
+        all completed successfully but reviewer_judge failed -- the one
+        realistic partial-staleness pattern this DAG's code can produce
+        (conflict_check/schema_validate never raise on valid input)."""
+        spawner = WorkerSpawner(graph)
+        job, directive = spawner.spawn(PAPER, ExtractionType.CLAIMS)
+        env = ReferenceWorker().run(directive, self.TEXT)
+        extractor_v = sr.verdict_from_extraction(env)
+        schema_v = sr.verdict_from_schema_validation(env.nodes)
+        conflict_v = sr.verdict_from_conflict_check(env.nodes, [])
+        ts = "2026-07-27T00:00:00+00:00"
+        run_result = RunResult(
+            spans=[
+                TaskSpan("extract", sr.ROLE_EXTRACTOR, None, TaskStatus.COMPLETED.value,
+                        extractor_v.confidence, ts),
+                TaskSpan("schema_validate", sr.ROLE_SCHEMA_VALIDATOR, None,
+                        TaskStatus.COMPLETED.value, None, ts),
+                TaskSpan("conflict_check", sr.ROLE_CONFLICT_CHECKER, None,
+                        TaskStatus.COMPLETED.value, None, ts),
+                TaskSpan("reviewer_judge", sr.ROLE_REVIEWER_JUDGE, None,
+                        TaskStatus.FAILED.value, None, ts, error="KeyError('simulated')"),
+            ],
+            completed={"extract", "schema_validate", "conflict_check"},
+            failed={"reviewer_judge"},
+        )
+        return sr.SpecialistPipelineReport(
+            paper_id=PAPER, job_id=directive.job_id, extraction_type=ExtractionType.CLAIMS.value,
+            verdicts=[extractor_v, schema_v, conflict_v],
+            admission=None, disagreements=[], run_result=run_result, envelope=env,
+        )
+
+    def test_selective_resume_only_reruns_reviewer_judge(self):
+        graph = ResearchGraph()
+        previous = self._completed_up_to_reviewer_judge(graph)
+        resumed = sr.resume_specialist_pipeline(graph, PAPER, self.TEXT, previous)
+        self.assertEqual({s.task_id for s in resumed.run_result.spans}, {"reviewer_judge"})
+        self.assertTrue(resumed.admission.admitted)
+        self.assertIsNotNone(resumed.verdict_for(sr.ROLE_EXTRACTOR))
+        self.assertIsNotNone(resumed.verdict_for(sr.ROLE_SCHEMA_VALIDATOR))
+        self.assertIsNotNone(resumed.verdict_for(sr.ROLE_CONFLICT_CHECKER))
+
+    def test_classifier_excluding_the_failure_class_skips_retry_entirely(self):
+        graph = ResearchGraph()
+        previous = self._completed_up_to_reviewer_judge(graph)
+        resumed = sr.resume_specialist_pipeline(
+            graph, PAPER, self.TEXT, previous,
+            classifier=sr.classify_specialist_failure,
+            retryable_classes={"worker_reported_failure"},  # excludes specialist_internal_error
+        )
+        self.assertIs(resumed, previous)
+
+    def test_classifier_allowing_the_failure_class_still_retries(self):
+        graph = ResearchGraph()
+        previous = self._completed_up_to_reviewer_judge(graph)
+        resumed = sr.resume_specialist_pipeline(
+            graph, PAPER, self.TEXT, previous,
+            classifier=sr.classify_specialist_failure,
+            retryable_classes={"specialist_internal_error"},
+        )
+        self.assertEqual({s.task_id for s in resumed.run_result.spans}, {"reviewer_judge"})
+
+    def test_fully_succeeded_run_returns_previous_report_unchanged(self):
+        graph = ResearchGraph()
+        report = sr.run_specialist_pipeline(graph, PAPER, self.TEXT)
+        resumed = sr.resume_specialist_pipeline(graph, PAPER, self.TEXT, report)
+        self.assertIs(resumed, report)
+
+    def test_selective_resume_without_envelope_raises_clearly(self):
+        graph = ResearchGraph()
+        previous = self._completed_up_to_reviewer_judge(graph)
+        previous.envelope = None
+        with self.assertRaises(ValueError):
+            sr.resume_specialist_pipeline(graph, PAPER, self.TEXT, previous)
+
+    def test_extract_failure_redoes_the_whole_pipeline_and_can_then_succeed(self):
+        graph = ResearchGraph()
+        report = sr.run_specialist_pipeline(graph, PAPER, self.TEXT, worker=_AlwaysFailsWorker())
+        self.assertIsNone(report.admission)
+        self.assertIn("conflict_check", report.run_result.skipped)
+
+        resumed = sr.resume_specialist_pipeline(graph, PAPER, self.TEXT, report)
+        self.assertEqual({s.task_id for s in resumed.run_result.spans},
+                         {"extract", "conflict_check", "schema_validate", "reviewer_judge"})
+        self.assertTrue(resumed.admission.admitted)
 
 
 if __name__ == "__main__":
