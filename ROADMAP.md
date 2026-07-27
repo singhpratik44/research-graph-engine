@@ -186,6 +186,15 @@ moves to the next item after `make validate` is green and a human has merged.
     captured from a live `uvicorn` run against the real demo graph) —
     both closing gaps in what a reader can verify without cloning and
     running the repo themselves.
+  - **Domain-pluggable `LLMWorker` prompts** (`llm_worker.py`'s
+    `domain=` param — `research` (default, byte-for-byte the original
+    wording), `hiring`, `ops_approval`, `compliance`, or a full
+    `prompt_overrides` escape hatch). Closes a real gap between what
+    README.md claims ("the same schema/gate/query pattern applies to
+    hiring pipelines, ops approvals, compliance review") and what the
+    one LLM-backed worker actually demonstrated: only the framing
+    sentence changes per domain, the JSON field contract
+    (`_field_instructions`) stays identical and domain-independent.
 
   Full suite: 460 tests passing; `make typecheck` clean across all 41
   modules.

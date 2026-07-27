@@ -45,6 +45,100 @@ class TestPromptFor(unittest.TestCase):
         self.assertIsNone(lw._prompt_for(directive, TEXT))
 
 
+class TestDomainFraming(unittest.TestCase):
+    """
+    llm_worker.py's prompts were hard-coded to research-literature framing
+    even though README.md claims this engine's schema/gate/query pattern
+    generalizes to hiring, ops-approval, and compliance domains too. This
+    proves the same worker can actually speak those domains without
+    touching the JSON field contract, and that the default reproduces
+    today's exact wording so nothing regresses for an existing caller.
+    """
+
+    def test_default_domain_reproduces_original_claims_prompt_exactly(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        prompt = lw._prompt_for(directive, TEXT)
+        explicit = lw._prompt_for(directive, TEXT, domain="research")
+        self.assertEqual(prompt, explicit)
+        for field in ("subject", "relation", "object", "confidence"):
+            self.assertIn(field, prompt)
+        self.assertIn(TEXT, prompt)
+
+    def test_default_domain_reproduces_original_concepts_prompt_exactly(self):
+        _, _, directive = _spawn(ExtractionType.CONCEPTS)
+        prompt = lw._prompt_for(directive, TEXT)
+        explicit = lw._prompt_for(directive, TEXT, domain="research")
+        self.assertEqual(prompt, explicit)
+
+    def test_each_built_in_domain_produces_distinct_framing_same_fields(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        prompts = {
+            domain: lw._prompt_for(directive, TEXT, domain=domain)
+            for domain in lw.KNOWN_DOMAINS
+        }
+        # every domain's prompt is distinct (different framing sentence)
+        self.assertEqual(len(set(prompts.values())), len(lw.KNOWN_DOMAINS))
+        # but every domain still carries the same field-shape contract
+        for prompt in prompts.values():
+            for field in ("subject", "relation", "object", "confidence"):
+                self.assertIn(field, prompt)
+
+    def test_hiring_domain_framing_mentions_candidate(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        prompt = lw._prompt_for(directive, TEXT, domain="hiring")
+        self.assertIn("candidate", prompt.lower())
+
+    def test_ops_approval_domain_framing_mentions_approval(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        prompt = lw._prompt_for(directive, TEXT, domain="ops_approval")
+        self.assertIn("approval", prompt.lower())
+
+    def test_compliance_domain_framing_mentions_compliance(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        prompt = lw._prompt_for(directive, TEXT, domain="compliance")
+        self.assertIn("compliance", prompt.lower())
+
+    def test_prompt_overrides_win_over_built_in_domain_framing(self):
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        override = "Extract claims about the widget from the TEXT below as a JSON array."
+        prompt = lw._prompt_for(
+            directive, TEXT, domain="research",
+            prompt_overrides={ExtractionType.CLAIMS: override})
+        self.assertIn("widget", prompt)
+        self.assertNotIn("factual claims from the TEXT below", prompt)
+
+    def test_unrecognized_domain_raises_at_worker_construction(self):
+        with self.assertRaises(ValueError):
+            lw.LLMWorker(domain="astrology")
+
+    def test_worker_uses_its_configured_domain_when_building_prompts(self):
+        captured = {}
+
+        def call_model(model, prompt):
+            captured["prompt"] = prompt
+            return "[]"
+
+        worker = lw.LLMWorker(call_model=call_model, domain="compliance")
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        worker.run(directive, TEXT)
+        self.assertIn("compliance", captured["prompt"].lower())
+
+    def test_worker_prompt_overrides_reach_the_model_call(self):
+        captured = {}
+
+        def call_model(model, prompt):
+            captured["prompt"] = prompt
+            return "[]"
+
+        override = "Extract claims about the widget from the TEXT below as a JSON array."
+        worker = lw.LLMWorker(
+            call_model=call_model,
+            prompt_overrides={ExtractionType.CLAIMS: override})
+        _, _, directive = _spawn(ExtractionType.CLAIMS)
+        worker.run(directive, TEXT)
+        self.assertIn("widget", captured["prompt"])
+
+
 class TestParseJsonArray(unittest.TestCase):
     def test_parses_plain_json_array(self):
         out = lw._parse_json_array('[{"text": "a"}]')

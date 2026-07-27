@@ -44,31 +44,94 @@ _REQUIRED_FIELDS: Dict[ExtractionType, List[str]] = {
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
+# The JSON field contract is dictated by _REQUIRED_FIELDS, not by domain --
+# every domain below shares these instructions verbatim.
+_FIELD_INSTRUCTIONS: Dict[ExtractionType, str] = {
+    ExtractionType.CLAIMS: (
+        ' Each item must have exactly these fields: "text" (the claim, '
+        'verbatim or close to it from the source), "subject" (short noun '
+        'phrase), "relation" (a verb/predicate), "object" (short noun '
+        'phrase), and "confidence" (a float from 0.0 to 1.0 reflecting how '
+        "directly and completely the TEXT supports this exact claim -- not "
+        "how plausible it sounds in general). Only include claims the TEXT "
+        "actually asserts; do not paraphrase in specifics it doesn't state. "
+        "Respond with ONLY the JSON array, no other text."
+    ),
+    ExtractionType.CONCEPTS: (
+        ' Each item must have exactly these fields: "text" (the concept, '
+        '1-4 words) and "confidence" (a float from 0.0 to 1.0 reflecting how '
+        "central this concept is to the TEXT). Respond with ONLY the JSON "
+        "array, no other text."
+    ),
+}
 
-def _prompt_for(directive: ExtractionDirective, text: str) -> Optional[str]:
-    if directive.extraction_type == ExtractionType.CLAIMS:
-        return (
-            "Extract factual claims from the TEXT below as a JSON array. Each "
-            'item must have exactly these fields: "text" (the claim, verbatim '
-            'or close to it from the source), "subject" (short noun phrase), '
-            '"relation" (a verb/predicate), "object" (short noun phrase), and '
-            '"confidence" (a float from 0.0 to 1.0 reflecting how directly and '
-            "completely the TEXT supports this exact claim -- not how "
-            "plausible it sounds in general). Only include claims the TEXT "
-            "actually asserts; do not paraphrase in specifics it doesn't "
-            "state. Respond with ONLY the JSON array, no other text.\n\n"
-            f"TEXT:\n{text}"
-        )
-    if directive.extraction_type == ExtractionType.CONCEPTS:
-        return (
-            "Extract the key technical concepts from the TEXT below as a JSON "
-            'array. Each item must have exactly these fields: "text" (the '
-            'concept, 1-4 words) and "confidence" (a float from 0.0 to 1.0 '
-            "reflecting how central this concept is to the TEXT). Respond "
-            "with ONLY the JSON array, no other text.\n\n"
-            f"TEXT:\n{text}"
-        )
-    return None
+
+def _field_instructions(extraction_type: ExtractionType) -> Optional[str]:
+    return _FIELD_INSTRUCTIONS.get(extraction_type)
+
+
+# Domain-specific framing only -- what kind of source TEXT this is and what
+# "claim"/"concept" means for it. Kept separate from _FIELD_INSTRUCTIONS so
+# adding a domain never touches the JSON contract. "research" reproduces the
+# exact original wording (the only domain this repo demonstrated before this
+# feature existed), matching the three domains README.md already names this
+# engine's schema/gate/query pattern generalizes to.
+_DOMAIN_FRAMING: Dict[str, Dict[ExtractionType, str]] = {
+    "research": {
+        ExtractionType.CLAIMS:
+            "Extract factual claims from the TEXT below as a JSON array.",
+        ExtractionType.CONCEPTS:
+            "Extract the key technical concepts from the TEXT below as a JSON array.",
+    },
+    "hiring": {
+        ExtractionType.CLAIMS:
+            "Extract factual claims about the candidate from the interview "
+            "notes or reference-check TEXT below as a JSON array.",
+        ExtractionType.CONCEPTS:
+            "Extract the key skills, tools, and competencies the candidate "
+            "TEXT below attributes to the candidate, as a JSON array.",
+    },
+    "ops_approval": {
+        ExtractionType.CLAIMS:
+            "Extract factual claims about whether the operational change or "
+            "request described in the TEXT below meets its approval "
+            "criteria, as a JSON array.",
+        ExtractionType.CONCEPTS:
+            "Extract the key operational concepts (systems, controls, risk "
+            "factors) referenced in the TEXT below, as a JSON array.",
+    },
+    "compliance": {
+        ExtractionType.CLAIMS:
+            "Extract factual claims about compliance or policy adherence "
+            "from the audit or review TEXT below, as a JSON array.",
+        ExtractionType.CONCEPTS:
+            "Extract the key compliance concepts (policies, controls, "
+            "regulations) referenced in the TEXT below, as a JSON array.",
+    },
+}
+
+KNOWN_DOMAINS = tuple(_DOMAIN_FRAMING.keys())
+
+
+def _prompt_for(
+    directive: ExtractionDirective,
+    text: str,
+    domain: str = "research",
+    prompt_overrides: Optional[Dict[ExtractionType, str]] = None,
+) -> Optional[str]:
+    field_instructions = _field_instructions(directive.extraction_type)
+    if field_instructions is None:
+        return None
+
+    framing = None
+    if prompt_overrides is not None:
+        framing = prompt_overrides.get(directive.extraction_type)
+    if framing is None:
+        framing = _DOMAIN_FRAMING[domain].get(directive.extraction_type)
+    if framing is None:
+        return None
+
+    return f"{framing}{field_instructions}\n\nTEXT:\n{text}"
 
 
 def _parse_json_array(raw: str) -> List[Dict[str, Any]]:
@@ -118,10 +181,17 @@ class LLMWorker:
         worker_id: str = "llm_worker_v1",
         model: str = DEFAULT_MODEL,
         call_model: Optional[Callable[[str, str], str]] = None,
+        domain: str = "research",
+        prompt_overrides: Optional[Dict[ExtractionType, str]] = None,
     ):
+        if domain not in _DOMAIN_FRAMING:
+            raise ValueError(
+                f"unrecognized domain {domain!r}; known domains: {KNOWN_DOMAINS}")
         self.worker_id = worker_id
         self.model = model
         self.call_model = call_model or _default_call_model
+        self.domain = domain
+        self.prompt_overrides = prompt_overrides
         self._seq = 0
 
     def _trace_id(self) -> str:
@@ -133,7 +203,7 @@ class LLMWorker:
                           conf, _now_placeholder(), human_reviewed=False)
 
     def run(self, directive: ExtractionDirective, text: str) -> ResultEnvelope:
-        prompt = _prompt_for(directive, text)
+        prompt = _prompt_for(directive, text, self.domain, self.prompt_overrides)
         if prompt is None:
             return ResultEnvelope(directive.job_id, self.worker_id, worker_status="failed",
                                   error=f"unsupported extraction_type "
