@@ -12,8 +12,13 @@ a SpecialistPipelineReport, instead of collapsing them into the single
 short-circuited GateDecision.
 
 Purely additive. research_graph_gates.py, research_graph_workers.py,
-research_graph_schema.py, task_graph.py, graph_memory.py, and
-graph_orchestrator.py are not modified -- this module only calls into them.
+task_graph.py, and graph_orchestrator.py are not modified -- this module
+only calls into them. research_graph_schema.py gained one closed-enum
+member (MemoryKind.CONFIDENCE_DIVERGENCE) and graph_memory.py gained
+confidence-divergence recording/reading -- both purely additive, added to
+support the optional confidence-divergence check below (opt-in via
+run_specialist_pipeline's divergence_threshold, default None, zero
+behavior change for every existing caller).
 
 Two of the four roles were already "built" per graph_orchestrator.py's own
 docstring, just not surfaced as an explicit, observable verdict:
@@ -102,6 +107,15 @@ class SpecialistPipelineReport:
     admission: Optional[AdmissionResult] = None
     disagreements: List[Node] = field(default_factory=list)
     run_result: Optional[RunResult] = None
+    # Confidence-divergence memory records (graph_memory.CONFIDENCE_DIVERGENCE)
+    # written when a re-derived candidate's confidence diverged from its
+    # already-admitted prior reading by at least divergence_threshold.
+    # Always empty unless run_specialist_pipeline's divergence_threshold is set.
+    confidence_divergences: List[Node] = field(default_factory=list)
+    # The extractor's raw envelope, kept for a caller that wants to resume a
+    # partially-failed run (see resume_specialist_pipeline) without
+    # re-invoking the worker for tasks that already completed successfully.
+    envelope: Optional[ResultEnvelope] = None
 
     def verdict_for(self, role: str) -> Optional[SpecialistVerdict]:
         return next((v for v in self.verdicts if v.role == role), None)
@@ -118,6 +132,10 @@ class SpecialistPipelineReport:
     def has_disagreement(self) -> bool:
         return bool(self.disagreements)
 
+    @property
+    def has_confidence_divergence(self) -> bool:
+        return bool(self.confidence_divergences)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "paper_id": self.paper_id,
@@ -127,8 +145,10 @@ class SpecialistPipelineReport:
             "all_specialist_checks_passed": self.all_specialist_checks_passed,
             "held_for_review": self.held_for_review,
             "has_disagreement": self.has_disagreement,
+            "has_confidence_divergence": self.has_confidence_divergence,
             "admission": self.admission.to_dict() if self.admission else None,
             "disagreements": [d.id for d in self.disagreements],
+            "confidence_divergences": [d.id for d in self.confidence_divergences],
         }
 
 
@@ -199,6 +219,45 @@ def verdict_from_conflict_check(candidate_nodes: List[Node],
     )
 
 
+def check_confidence_divergence(
+    graph: ResearchGraph,
+    candidate_nodes: List[Node],
+    existing_nodes: List[Node],
+    threshold: float,
+) -> List[Node]:
+    """
+    For each candidate whose id already exists among existing_nodes (a
+    re-derivation of an already-admitted node -- ReferenceWorker/LLMWorker
+    both mint deterministic ids from paper_id+text, so re-running the same
+    extraction reproduces the same candidate ids), compare the prior node's
+    confidence ("derivation") to the new candidate's ("validation"). A gap
+    of at least `threshold` is recorded via graph_memory
+    .record_confidence_divergence -- advisory only, same posture as
+    reconcile_and_admit's disagreement recording: this never blocks or
+    alters admission, it only makes the gap a durable, queryable fact
+    instead of a silent overwrite of Provenance.confidence.
+    """
+    existing_by_id = {n.id: n for n in existing_nodes}
+    divergences: List[Node] = []
+    for candidate in candidate_nodes:
+        prior = existing_by_id.get(candidate.id)
+        if prior is None:
+            continue
+        derivation_conf = prior.provenance.confidence if prior.provenance else None
+        validation_conf = candidate.provenance.confidence if candidate.provenance else None
+        if derivation_conf is None or validation_conf is None:
+            continue
+        if abs(validation_conf - derivation_conf) >= threshold:
+            divergences.append(graph_memory.record_confidence_divergence(
+                graph, node_id=candidate.id,
+                derivation_confidence=derivation_conf,
+                validation_confidence=validation_conf,
+                note=f"gap {abs(validation_conf - derivation_conf):.2f} >= "
+                     f"threshold {threshold:.2f}",
+            ))
+    return divergences
+
+
 # ============================================================================
 # RECONCILIATION + COMMIT
 # ============================================================================
@@ -267,12 +326,21 @@ def run_specialist_pipeline(
     confidence_floor: float = 0.0,
     max_results: Optional[int] = None,
     max_workers: int = 4,
+    divergence_threshold: Optional[float] = None,
 ) -> SpecialistPipelineReport:
     """
     High-level entry point: spawn one extraction job, run it through the four
     specialist roles over a genuine task_graph.Scheduler-run DAG (extract ->
     {conflict_check, schema_validate} in parallel -> reviewer_judge), and
     return one reconciled report.
+
+    `divergence_threshold` (default None): when set, reviewer_judge also
+    checks each candidate against any already-admitted node sharing its id
+    (a re-derivation of the same paper_id+text -- workers mint deterministic
+    ids, so this only fires on a genuine re-run) and records a
+    CONFIDENCE_DIVERGENCE memory record when the confidence gap is at least
+    this threshold. None (the default) disables the check entirely -- zero
+    behavior change for every existing caller.
     """
     spawner = WorkerSpawner(graph, gate)
     worker = worker or ReferenceWorker(worker_id="specialist_reference_worker")
@@ -284,6 +352,7 @@ def run_specialist_pipeline(
     envelope_box: Dict[str, ResultEnvelope] = {}
     admission_box: Dict[str, AdmissionResult] = {}
     disagreements_box: Dict[str, List[Node]] = {}
+    divergences_box: Dict[str, List[Node]] = {}
 
     def executor(task_id: str) -> Optional[Dict[str, float]]:
         if task_id == "extract":
@@ -313,6 +382,12 @@ def run_specialist_pipeline(
 
         if task_id == "reviewer_judge":
             env = envelope_box["env"]
+            divergences: List[Node] = []
+            if divergence_threshold is not None:
+                divergences = check_confidence_divergence(
+                    graph, env.nodes, existing_nodes, divergence_threshold)
+            divergences_box["divergences"] = divergences
+
             admission, disagreements = reconcile_and_admit(
                 graph, spawner, directive, env,
                 verdicts[ROLE_SCHEMA_VALIDATOR], verdicts[ROLE_CONFLICT_CHECKER],
@@ -327,7 +402,8 @@ def run_specialist_pipeline(
                         f"status={admission.job_node.properties.get('status')}"),
                 evidence={"admitted": admission.admitted,
                           "held_for_review": admission.review_task is not None,
-                          "disagreements": len(disagreements)},
+                          "disagreements": len(disagreements),
+                          "confidence_divergences": len(divergences)},
             )
             verdicts[ROLE_REVIEWER_JUDGE] = verdict
             return {}
@@ -345,6 +421,8 @@ def run_specialist_pipeline(
         admission=admission_box.get("admission"),
         disagreements=disagreements_box.get("disagreements", []),
         run_result=run_result,
+        confidence_divergences=divergences_box.get("divergences", []),
+        envelope=envelope_box.get("env"),
     )
 
 

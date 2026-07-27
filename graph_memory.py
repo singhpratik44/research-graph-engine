@@ -238,6 +238,68 @@ def record_disagreement(
     return node
 
 
+def record_confidence_divergence(
+    graph: ResearchGraph,
+    node_id: str,
+    derivation_confidence: Optional[float],
+    validation_confidence: Optional[float],
+    note: str = "",
+) -> Node:
+    """
+    Record a gap between a node's confidence when it was first derived
+    (extracted) and its confidence on a later re-validation (a retry, a
+    repair, or a subsequent pipeline re-run against the same source) --
+    distinct from `record_disagreement` (two *humans* disagreeing) and from
+    `ConflictEdge` (two *claims* contradicting each other): this is one
+    node's own confidence reading changing across time, which the gate's
+    single scalar `Provenance.confidence` has no memory of on its own.
+    Linked DERIVED_FROM -> node_id ("this memory record was computed from
+    that node"), the same edge `record_task_outcome`/`record_blocked_reason`
+    already use for that relationship.
+    """
+    if graph.index().get(node_id) is None:
+        raise KeyError(f"no such node: {node_id!r}")
+    summary = (f"{node_id} confidence diverged: derivation="
+               f"{derivation_confidence} -> validation={validation_confidence}")
+    node = _memory_node(
+        kind=MemoryKind.CONFIDENCE_DIVERGENCE,
+        subject_ref=node_id,
+        summary=summary,
+        confidence=validation_confidence,
+        source_paper=node_id,
+        human_reviewed=False,
+        review_notes=note,
+        details={"node_id": node_id, "derivation_confidence": derivation_confidence,
+                 "validation_confidence": validation_confidence, "note": note},
+    )
+    graph.nodes.append(node)
+    graph.edges.append(Edge(source=node.id, target=node_id,
+                             type=EdgeType.DERIVED_FROM.value, provenance=node.provenance))
+    return node
+
+
+def confidence_divergence_for(graph: ResearchGraph, node_id: str) -> List[Node]:
+    """
+    Every CONFIDENCE_DIVERGENCE memory record linked to `node_id` via
+    DERIVED_FROM. Unlike `prior_disagreements_on` (safe to filter by edge
+    type alone, since only `record_disagreement` ever emits DISAGREED_ON),
+    DERIVED_FROM is shared with `record_task_outcome`, `record_blocked_reason`,
+    and `record_repair_pattern` -- this must also filter by `memory_kind`,
+    or it would silently return unrelated memory records that just happen
+    to point at the same node.
+    """
+    idx = graph.index()
+    out: List[Node] = []
+    for e in graph.edges:
+        if e.type != EdgeType.DERIVED_FROM.value or e.target != node_id:
+            continue
+        record = idx.get(e.source)
+        if record is not None and record.properties.get("memory_kind") == \
+                MemoryKind.CONFIDENCE_DIVERGENCE.value:
+            out.append(record)
+    return out
+
+
 def record_blocked_reason(graph: ResearchGraph, gate_decision: "gates.GateDecision") -> Node:
     """
     Persist a GateDecision's block reason as durable graph data instead of

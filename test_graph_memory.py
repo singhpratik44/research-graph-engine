@@ -174,6 +174,61 @@ class TestRecordDisagreement(unittest.TestCase):
 
 
 # ===========================================================================
+# record_confidence_divergence / confidence_divergence_for
+# ===========================================================================
+
+class TestRecordConfidenceDivergence(unittest.TestCase):
+    def test_records_divergence_and_links_derived_from(self):
+        g = _graph()
+        node = mem.record_confidence_divergence(
+            g, "claim_2606_001", derivation_confidence=0.91,
+            validation_confidence=0.4, note="re-run scored much lower")
+
+        self.assertEqual(node.properties["memory_kind"],
+                         MemoryKind.CONFIDENCE_DIVERGENCE.value)
+        self.assertEqual(node.properties["details"]["derivation_confidence"], 0.91)
+        self.assertEqual(node.properties["details"]["validation_confidence"], 0.4)
+        self.assertAlmostEqual(node.properties["confidence"], 0.4)
+        edges = [e for e in g.edges if e.type == EdgeType.DERIVED_FROM.value
+                and e.source == node.id]
+        self.assertEqual(len(edges), 1)
+        self.assertEqual(edges[0].target, "claim_2606_001")
+        self.assertTrue(g.validate().valid, g.validate().to_dict())
+
+    def test_unknown_node_id_raises(self):
+        g = _graph()
+        with self.assertRaises(KeyError):
+            mem.record_confidence_divergence(g, "nope", 0.9, 0.2)
+
+
+class TestConfidenceDivergenceFor(unittest.TestCase):
+    def test_finds_recorded_divergence(self):
+        g = _graph()
+        mem.record_confidence_divergence(g, "claim_2606_001", 0.91, 0.4)
+        found = mem.confidence_divergence_for(g, "claim_2606_001")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].properties["memory_kind"],
+                         MemoryKind.CONFIDENCE_DIVERGENCE.value)
+
+    def test_does_not_return_other_memory_kinds_sharing_derived_from(self):
+        """DERIVED_FROM is shared with TASK_OUTCOME/BLOCKED_REASON/REPAIR_PATTERN --
+        confidence_divergence_for must filter by memory_kind, not just edge type,
+        or it would silently return unrelated records pointed at the same node."""
+        g = _graph()
+        mem.record_task_outcome(g, TaskSpan(
+            task_id="claim_2606_001", agent_id="a", parent_task_id=None,
+            status="completed", confidence=0.8,
+            started_at="2026-07-27T00:00:00+00:00", ended_at="2026-07-27T00:00:01+00:00",
+        ))
+        found = mem.confidence_divergence_for(g, "claim_2606_001")
+        self.assertEqual(found, [])
+
+    def test_no_divergence_recorded_returns_empty(self):
+        g = _graph()
+        self.assertEqual(mem.confidence_divergence_for(g, "claim_2606_001"), [])
+
+
+# ===========================================================================
 # record_blocked_reason
 # ===========================================================================
 

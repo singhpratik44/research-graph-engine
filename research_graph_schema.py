@@ -21,7 +21,7 @@ from enum import Enum
 from datetime import datetime, timezone
 import json
 
-SCHEMA_VERSION = "3.1.0"
+SCHEMA_VERSION = "3.2.0"
 
 
 # ============================================================================
@@ -152,6 +152,7 @@ class MemoryKind(str, Enum):
     REVIEWER_DISAGREEMENT = "reviewer_disagreement"  # two humans disagreeing on one node
     BLOCKED_REASON = "blocked_reason"              # a GateDecision's block, persisted
     REPAIR_PATTERN = "repair_pattern"              # how a rejected/blocked item got fixed
+    CONFIDENCE_DIVERGENCE = "confidence_divergence"  # derivation- vs validation-time confidence gap
 
 
 def _now() -> str:

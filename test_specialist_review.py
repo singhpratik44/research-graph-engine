@@ -112,6 +112,34 @@ class TestVerdictFromConflictCheck(unittest.TestCase):
         self.assertTrue(v.passed, v.evidence)
 
 
+class TestCheckConfidenceDivergence(unittest.TestCase):
+    def test_id_match_with_large_confidence_gap_is_recorded(self):
+        graph = ResearchGraph()
+        existing = _claim("c1", "x", "reduces", "y", conf=0.9)
+        graph.nodes.append(existing)
+        candidate = _claim("c1", "x", "reduces", "y", conf=0.3)  # same id, re-derived
+        divergences = sr.check_confidence_divergence(graph, [candidate], [existing], threshold=0.2)
+        self.assertEqual(len(divergences), 1)
+        self.assertEqual(divergences[0].properties["details"]["derivation_confidence"], 0.9)
+        self.assertEqual(divergences[0].properties["details"]["validation_confidence"], 0.3)
+
+    def test_gap_below_threshold_is_not_recorded(self):
+        graph = ResearchGraph()
+        existing = _claim("c1", "x", "reduces", "y", conf=0.9)
+        graph.nodes.append(existing)
+        candidate = _claim("c1", "x", "reduces", "y", conf=0.85)
+        divergences = sr.check_confidence_divergence(graph, [candidate], [existing], threshold=0.2)
+        self.assertEqual(divergences, [])
+
+    def test_no_id_match_is_not_a_divergence(self):
+        graph = ResearchGraph()
+        existing = _claim("c1", "x", "reduces", "y", conf=0.9)
+        graph.nodes.append(existing)
+        candidate = _claim("c2", "p", "improves", "q", conf=0.1)  # different id
+        divergences = sr.check_confidence_divergence(graph, [candidate], [existing], threshold=0.2)
+        self.assertEqual(divergences, [])
+
+
 # ============================================================================
 # Reconciliation
 # ============================================================================
@@ -331,6 +359,26 @@ class TestRunSpecialistPipelineEndToEnd(unittest.TestCase):
         sr.run_specialist_pipeline(graph, PAPER,
             "Hierarchical orchestration reduces coordination overhead.")
         self.assertTrue(graph.validate().valid, graph.validate().to_dict())
+
+    def test_divergence_threshold_none_default_never_records_even_with_huge_gap(self):
+        graph = ResearchGraph()
+        text = "Hierarchical orchestration reduces coordination overhead."
+        first = sr.run_specialist_pipeline(graph, PAPER, text)
+        first.envelope.nodes[0].provenance.confidence = 0.05  # simulate a big prior drift
+        second = sr.run_specialist_pipeline(graph, PAPER, text)  # divergence_threshold=None
+        self.assertEqual(second.confidence_divergences, [])
+        self.assertFalse(second.has_confidence_divergence)
+
+    def test_divergence_threshold_set_records_a_real_gap(self):
+        graph = ResearchGraph()
+        text = "Hierarchical orchestration reduces coordination overhead."
+        first = sr.run_specialist_pipeline(graph, PAPER, text)
+        first.envelope.nodes[0].provenance.confidence = 0.05
+        second = sr.run_specialist_pipeline(graph, PAPER, text, divergence_threshold=0.2)
+        self.assertEqual(len(second.confidence_divergences), 1)
+        self.assertTrue(second.has_confidence_divergence)
+        record = second.confidence_divergences[0]
+        self.assertAlmostEqual(record.properties["details"]["derivation_confidence"], 0.05)
 
 
 if __name__ == "__main__":
