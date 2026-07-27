@@ -1,0 +1,91 @@
+QUANTUM COMPUTING JOB SEARCH STRATEGY
+=====================================
+
+PRIMARY TARGETS (High Probability Match):
+
+1. GOOGLE QUANTUM AI
+   - Position: Senior Research Scientist, Neutral Atoms Control Electronics
+   - Location: Boulder, CO (your current application)
+   - Status: Check Google Careers for related positions
+   - Keywords: quantum, control, systems, research scientist
+
+2. ATOM COMPUTING
+   - Company: https://www.atom-computing.com/careers
+   - Focus: Neutral atom quantum computers
+   - Likely Roles: Quantum Control Engineer, Systems Architect, Software Engineer
+   - Why Match: Your exact domain (neutral atoms, real-time control)
+
+3. RIGETTI COMPUTING
+   - Company: https://rigetti.com/careers
+   - Focus: Hybrid quantum-classical computing
+   - Likely Roles: Quantum Systems Engineer, Control Systems Engineer
+   - Why Match: Real-time control, distributed systems
+
+4. IONQ
+   - Company: https://ionq.com/careers
+   - Focus: Trapped-ion quantum computers
+   - Likely Roles: Systems Engineer, Controls Engineer
+   - Why Match: Error correction, real-time systems (different platform but transferable)
+
+5. PSIQUANTUM
+   - Company: https://www.psiquantum.com/careers
+   - Focus: Photonic quantum computing
+   - Likely Roles: Quantum Systems Engineer
+   - Why Match: Systems architecture, distributed approach
+
+SECONDARY TARGETS (Strong Fit):
+
+6. NATIONAL LABS
+   - Sandia National Laboratories (Albuquerque, NM)
+     Search: "quantum" + "control" + "systems"
+   - Los Alamos National Lab (Los Alamos, NM)
+     Search: "quantum computing" + "systems"
+   - MIT Lincoln Laboratory (Lexington, MA)
+     Search: "quantum" + "engineer"
+
+7. UNIVERSITIES WITH QUANTUM LABS
+   - UC Berkeley (Quantum Nanoelectronics Lab)
+   - MIT (Quantum Engineering Lab)
+   - Yale (Quantum Information & Computation Lab)
+   - CU Boulder (related to Google Quantum AI)
+   - University of Maryland
+
+8. QUANTUM SOFTWARE/INFRASTRUCTURE
+   - Zapata Computing (quantum algorithms)
+   - Classiq (quantum circuit synthesis)
+   - Qiskit/IBM Quantum (open-source quantum)
+   - Cirq/Google (quantum circuit framework)
+
+TERTIARY TARGETS (Exploration):
+
+9. EARLY-STAGE STARTUPS
+   - Pasqal Quantum Computing
+   - Quantinuum
+   - Psicodex
+   - Quantum Xchange
+   - IonSense
+
+10. CONSULTING
+    - McKinsey Quantum Lab
+    - BCG Quantum Lab
+    - Deloitte Quantum
+    - Booz Allen Hamilton (quantum initiatives)
+
+SEARCH KEYWORDS TO USE:
+- "quantum control" engineer
+- "neutral atom" systems
+- "real-time control" quantum
+- "quantum error correction" implementation
+- "systems architect" quantum
+- "quantum hardware" control
+- "Rydberg atom" engineer
+
+JOB BOARDS TO CHECK:
+1. LinkedIn.com (filter: Quantum Computing, Research Scientist, Senior Engineer)
+2. Indeed.com (search: "quantum control" OR "quantum systems")
+3. GitHub Jobs (search: "quantum")
+4. AngelList/Wellfound (startup filter + quantum)
+5. Company career pages directly
+6. Physics Today Jobs
+7. Xrds.acm.org (ACM career listings)
+
