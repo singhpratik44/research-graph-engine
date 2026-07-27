@@ -139,3 +139,13 @@ That's the artifact worth showing: not the extraction quality, but that the
 system can always answer *why* something got through — and the four pieces
 above (inspection, queries, evals, and now a UI and live ingestion) all exist
 to make that answerable by someone who will never read the Python.
+
+## `quantum/` — a separate implementation
+
+This repo also contains a standalone quantum-computing implementation in
+[`quantum/`](quantum/) — real stabilizer/CSS error-correcting codes, a
+hypergraph-product qLDPC code construction, Monte Carlo logical-error-rate
+simulation, and an autonomous self-optimizing control loop over all of it.
+It shares no code or pattern with the governance engine above; see
+[`quantum/README.md`](quantum/README.md) for what it is and the research
+that informed it.
