@@ -1,0 +1,470 @@
+{
+  "franchisee": {
+    "prospects": [
+      {
+        "prospect_id": "FK-001",
+        "company_name": "Learning Stars LLC",
+        "contact_person": "Sarah Mitchell",
+        "status": "opening",
+        "inquiry_date": "2024-10-15",
+        "territory": "TX",
+        "investment_capacity": "500k_1m",
+        "experience_level": "franchise_veteran",
+        "projected_open_date": "2026-09-01",
+        "notes": null,
+        "last_communication_date": "2026-07-20"
+      },
+      {
+        "prospect_id": "FK-002",
+        "company_name": "Early Excellence Education",
+        "contact_person": "Michael Chen",
+        "status": "signed",
+        "inquiry_date": "2024-12-01",
+        "territory": "CA",
+        "investment_capacity": "500k_1m",
+        "experience_level": "education_background",
+        "projected_open_date": "2027-03-01",
+        "notes": null,
+        "last_communication_date": "2026-07-18"
+      },
+      {
+        "prospect_id": "FK-003",
+        "company_name": "Bright Futures Development",
+        "contact_person": "Jennifer Walsh",
+        "status": "signed",
+        "inquiry_date": "2025-03-10",
+        "territory": "FL",
+        "investment_capacity": "250k_500k",
+        "experience_level": "franchise_novice",
+        "projected_open_date": "2027-02-15",
+        "notes": null,
+        "last_communication_date": "2026-07-15"
+      },
+      {
+        "prospect_id": "FK-004",
+        "company_name": "Creative Kids Network",
+        "contact_person": "David Rodriguez",
+        "status": "negotiation",
+        "inquiry_date": "2025-05-20",
+        "territory": "NY",
+        "investment_capacity": "500k_1m",
+        "experience_level": "franchise_veteran",
+        "projected_open_date": null,
+        "notes": null,
+        "last_communication_date": "2026-07-10"
+      },
+      {
+        "prospect_id": "FK-005",
+        "company_name": "Academic Pathways Group",
+        "contact_person": "Patricia Lee",
+        "status": "qualified",
+        "inquiry_date": "2026-02-15",
+        "territory": "PA",
+        "investment_capacity": "250k_500k",
+        "experience_level": "franchise_novice",
+        "projected_open_date": null,
+        "notes": null,
+        "last_communication_date": "2026-07-05"
+      },
+      {
+        "prospect_id": "FK-006",
+        "company_name": "Innovation Learning Centers",
+        "contact_person": "Robert Thompson",
+        "status": "inquiry",
+        "inquiry_date": "2026-06-10",
+        "territory": "IL",
+        "investment_capacity": "over_1m",
+        "experience_level": "education_background",
+        "projected_open_date": null,
+        "notes": null,
+        "last_communication_date": "2026-07-01"
+      },
+      {
+        "prospect_id": "FK-007",
+        "company_name": "Youth Growth Foundation",
+        "contact_person": "Amanda Martinez",
+        "status": "inquiry",
+        "inquiry_date": "2026-06-25",
+        "territory": "GA",
+        "investment_capacity": "250k_500k",
+        "experience_level": "franchise_novice",
+        "projected_open_date": null,
+        "notes": null,
+        "last_communication_date": "2026-06-28"
+      },
+      {
+        "prospect_id": "FK-008",
+        "company_name": "Metropolitan Education Trust",
+        "contact_person": "James Porter",
+        "status": "opened",
+        "inquiry_date": "2025-01-20",
+        "territory": "TX",
+        "investment_capacity": "500k_1m",
+        "experience_level": "franchise_veteran",
+        "projected_open_date": "2026-03-01",
+        "notes": null,
+        "last_communication_date": "2026-07-20"
+      },
+      {
+        "prospect_id": "FK-009",
+        "company_name": "Western Star Academies",
+        "contact_person": "Lisa Anderson",
+        "status": "opened",
+        "inquiry_date": "2025-02-10",
+        "territory": "CA",
+        "investment_capacity": "500k_1m",
+        "experience_level": "education_background",
+        "projected_open_date": "2026-05-15",
+        "notes": null,
+        "last_communication_date": "2026-07-21"
+      }
+    ],
+    "performance": [
+      {
+        "franchisee_id": "FK-008",
+        "state": "TX",
+        "months_operating": 16,
+        "enrollment_trajectory": "growing",
+        "profitability_status": "profitable",
+        "satisfaction_score": 8.8,
+        "at_risk": false
+      },
+      {
+        "franchisee_id": "FK-009",
+        "state": "CA",
+        "months_operating": 14,
+        "enrollment_trajectory": "growing",
+        "profitability_status": "profitable",
+        "satisfaction_score": 8.9,
+        "at_risk": false
+      },
+      {
+        "franchisee_id": "FK-003",
+        "state": "FL",
+        "months_operating": 10,
+        "enrollment_trajectory": "growing",
+        "profitability_status": "breaking_even",
+        "satisfaction_score": 7.5,
+        "at_risk": false
+      },
+      {
+        "franchisee_id": "FK-004",
+        "state": "NY",
+        "months_operating": 7,
+        "enrollment_trajectory": "flat",
+        "profitability_status": "losing_money",
+        "satisfaction_score": 7.3,
+        "at_risk": true
+      },
+      {
+        "franchisee_id": "FK-005",
+        "state": "PA",
+        "months_operating": 2,
+        "enrollment_trajectory": "growing",
+        "profitability_status": "losing_money",
+        "satisfaction_score": 6.8,
+        "at_risk": true
+      }
+    ],
+    "pipeline": {
+      "total_prospects": 9,
+      "by_status": {
+        "opening": 1,
+        "signed": 2,
+        "negotiation": 1,
+        "qualified": 1,
+        "inquiry": 2,
+        "opened": 2
+      },
+      "signed": 2,
+      "opening": 1,
+      "opened": 2
+    },
+    "health": {
+      "total_franchisees": 5,
+      "profitable_count": 2,
+      "profitable_pct": 40.0,
+      "at_risk_count": 2,
+      "avg_satisfaction": 7.9
+    }
+  },
+  "enrollment": [
+    {
+      "center_id": "BK-TX-001",
+      "center_name": "Building Kidz \u2014 Austin",
+      "state": "TX",
+      "opening_date": "2024-09-01",
+      "status": "mature",
+      "monthly_inquiries": 18,
+      "inquiry_to_enrollment_conversion_rate": 0.72,
+      "current_enrollment": 72,
+      "capacity": 90,
+      "monthly_tuition_revenue": 54000,
+      "franchisee_satisfaction": 8.8
+    },
+    {
+      "center_id": "BK-CA-001",
+      "center_name": "Building Kidz \u2014 Bay Area",
+      "state": "CA",
+      "opening_date": "2024-08-15",
+      "status": "mature",
+      "monthly_inquiries": 22,
+      "inquiry_to_enrollment_conversion_rate": 0.68,
+      "current_enrollment": 78,
+      "capacity": 95,
+      "monthly_tuition_revenue": 58000,
+      "franchisee_satisfaction": 8.9
+    },
+    {
+      "center_id": "BK-FL-001",
+      "center_name": "Building Kidz \u2014 Miami",
+      "state": "FL",
+      "opening_date": "2025-03-01",
+      "status": "operational",
+      "monthly_inquiries": 14,
+      "inquiry_to_enrollment_conversion_rate": 0.62,
+      "current_enrollment": 52,
+      "capacity": 75,
+      "monthly_tuition_revenue": 38000,
+      "franchisee_satisfaction": 7.5
+    },
+    {
+      "center_id": "BK-NY-001",
+      "center_name": "Building Kidz \u2014 Manhattan",
+      "state": "NY",
+      "opening_date": "2025-06-01",
+      "status": "operational",
+      "monthly_inquiries": 16,
+      "inquiry_to_enrollment_conversion_rate": 0.65,
+      "current_enrollment": 48,
+      "capacity": 80,
+      "monthly_tuition_revenue": 36000,
+      "franchisee_satisfaction": 7.3
+    },
+    {
+      "center_id": "BK-PA-001",
+      "center_name": "Building Kidz \u2014 Philadelphia",
+      "state": "PA",
+      "opening_date": "2026-01-15",
+      "status": "launching",
+      "monthly_inquiries": 8,
+      "inquiry_to_enrollment_conversion_rate": 0.55,
+      "current_enrollment": 22,
+      "capacity": 60,
+      "monthly_tuition_revenue": 16000,
+      "franchisee_satisfaction": 6.8
+    },
+    {
+      "center_id": "BK-IL-001",
+      "center_name": "Building Kidz \u2014 Chicago",
+      "state": "IL",
+      "opening_date": "2026-04-01",
+      "status": "launching",
+      "monthly_inquiries": 6,
+      "inquiry_to_enrollment_conversion_rate": 0.5,
+      "current_enrollment": 18,
+      "capacity": 60,
+      "monthly_tuition_revenue": 13500,
+      "franchisee_satisfaction": 6.5
+    }
+  ],
+  "launch": [
+    {
+      "center_id": "BK-TX-001",
+      "franchisee_id": "FK-008",
+      "soft_opening_date": "2026-02-15",
+      "grand_opening_date": "2026-03-01",
+      "ninety_day_target": 65,
+      "enrollment_at_30_days": 28,
+      "enrollment_at_60_days": 52,
+      "enrollment_at_90_days": 72,
+      "vs_target_pct": 110.8,
+      "status": "active"
+    },
+    {
+      "center_id": "BK-CA-001",
+      "franchisee_id": "FK-009",
+      "soft_opening_date": "2026-04-20",
+      "grand_opening_date": "2026-05-15",
+      "ninety_day_target": 70,
+      "enrollment_at_30_days": 32,
+      "enrollment_at_60_days": 61,
+      "enrollment_at_90_days": 78,
+      "vs_target_pct": 111.4,
+      "status": "active"
+    },
+    {
+      "center_id": "BK-FL-001",
+      "franchisee_id": "FK-003",
+      "soft_opening_date": "2025-02-10",
+      "grand_opening_date": "2025-03-01",
+      "ninety_day_target": 60,
+      "enrollment_at_30_days": 22,
+      "enrollment_at_60_days": 40,
+      "enrollment_at_90_days": 52,
+      "vs_target_pct": 86.7,
+      "status": "active"
+    },
+    {
+      "center_id": "BK-NY-001",
+      "franchisee_id": "FK-004",
+      "soft_opening_date": "2025-05-10",
+      "grand_opening_date": "2025-06-01",
+      "ninety_day_target": 55,
+      "enrollment_at_30_days": 18,
+      "enrollment_at_60_days": 35,
+      "enrollment_at_90_days": 48,
+      "vs_target_pct": 87.3,
+      "status": "active"
+    },
+    {
+      "center_id": "BK-PA-001",
+      "franchisee_id": "FK-005",
+      "soft_opening_date": "2026-01-01",
+      "grand_opening_date": "2026-01-15",
+      "ninety_day_target": 50,
+      "enrollment_at_30_days": 12,
+      "enrollment_at_60_days": 18,
+      "enrollment_at_90_days": 22,
+      "vs_target_pct": 44.0,
+      "status": "launching"
+    }
+  ],
+  "marketing": [
+    {
+      "campaign_id": "MK-001",
+      "campaign_name": "Google/Facebook Paid Search \u2014 Texas",
+      "channel": "digital",
+      "budget": 8000,
+      "inquiries_generated": 68,
+      "cost_per_inquiry": 117.65,
+      "conversions": 44,
+      "roi_pct": 112.5
+    },
+    {
+      "campaign_id": "MK-002",
+      "campaign_name": "Google/Facebook Paid Search \u2014 California",
+      "channel": "digital",
+      "budget": 9500,
+      "inquiries_generated": 72,
+      "cost_per_inquiry": 131.94,
+      "conversions": 48,
+      "roi_pct": 108.3
+    },
+    {
+      "campaign_id": "MK-003",
+      "campaign_name": "Local SEO + GMB Optimization",
+      "channel": "local",
+      "budget": 4000,
+      "inquiries_generated": 58,
+      "cost_per_inquiry": 68.97,
+      "conversions": 32,
+      "roi_pct": 94.2
+    },
+    {
+      "campaign_id": "MK-004",
+      "campaign_name": "Community Events + Sponsorships",
+      "channel": "events",
+      "budget": 6000,
+      "inquiries_generated": 45,
+      "cost_per_inquiry": 133.33,
+      "conversions": 24,
+      "roi_pct": 76.5
+    },
+    {
+      "campaign_id": "MK-005",
+      "campaign_name": "School Partnerships + Cross-Promo",
+      "channel": "partnerships",
+      "budget": 5000,
+      "inquiries_generated": 62,
+      "cost_per_inquiry": 80.65,
+      "conversions": 38,
+      "roi_pct": 106.8
+    },
+    {
+      "campaign_id": "MK-006",
+      "campaign_name": "Franchisee Word-of-Mouth + Referrals",
+      "channel": "franchisee_run",
+      "budget": 2000,
+      "inquiries_generated": 38,
+      "cost_per_inquiry": 52.63,
+      "conversions": 28,
+      "roi_pct": 78.4
+    }
+  ],
+  "summaries": {
+    "pipeline": {
+      "total_prospects": 9,
+      "by_status": {
+        "opening": 1,
+        "signed": 2,
+        "negotiation": 1,
+        "qualified": 1,
+        "inquiry": 2,
+        "opened": 2
+      },
+      "signed": 2,
+      "opening": 1,
+      "opened": 2
+    },
+    "enrollment": {
+      "total_enrolled": 290,
+      "total_monthly_inquiries": 84,
+      "avg_conversion_rate": 0.62,
+      "total_capacity": 460,
+      "capacity_utilization_pct": 63.0,
+      "total_monthly_revenue": 215500,
+      "avg_franchisee_satisfaction": 7.6,
+      "number_of_centers": 6
+    },
+    "launch": {
+      "total_launches": 5,
+      "successful_launches": 4,
+      "success_rate_pct": 80.0,
+      "at_risk_launches": 0,
+      "avg_vs_target_pct": 88.0
+    },
+    "marketing": {
+      "total_campaigns": 6,
+      "total_budget": 34500,
+      "total_inquiries_generated": 343,
+      "avg_cost_per_inquiry": 100.58,
+      "avg_roi_pct": 96.1,
+      "best_channel": "digital",
+      "by_channel": {
+        "digital": {
+          "budget": 17500,
+          "inquiries": 140,
+          "avg_roi_pct": 110.4
+        },
+        "local": {
+          "budget": 4000,
+          "inquiries": 58,
+          "avg_roi_pct": 94.2
+        },
+        "events": {
+          "budget": 6000,
+          "inquiries": 45,
+          "avg_roi_pct": 76.5
+        },
+        "partnerships": {
+          "budget": 5000,
+          "inquiries": 62,
+          "avg_roi_pct": 106.8
+        },
+        "franchisee_run": {
+          "budget": 2000,
+          "inquiries": 38,
+          "avg_roi_pct": 78.4
+        }
+      }
+    },
+    "franchisee_health": {
+      "total_franchisees": 5,
+      "profitable_count": 2,
+      "profitable_pct": 40.0,
+      "at_risk_count": 2,
+      "avg_satisfaction": 7.9
+    }
+  }
+}

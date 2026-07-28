@@ -3,561 +3,828 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Building Kidz Worldwide Franchise Engine</title>
+    <title>Building Kidz Worldwide — Growth Command Center</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { font-size: 14px; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: #f5f5f5;
+            color: #111;
+            line-height: 1.6;
         }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
-
+        .container { max-width: 1400px; margin: 0 auto; }
         header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
-            padding: 40px 30px;
+            padding: 40px 20px;
             text-align: center;
         }
-
-        header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-
-        header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-
-        .summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            padding: 30px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e9ecef;
-        }
-
-        .stat {
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            color: #666;
-            font-size: 0.95em;
-        }
-
-        .tabs {
+        header h1 { font-size: 2.2em; margin-bottom: 10px; }
+        header p { font-size: 1.1em; opacity: 0.9; }
+        .content { padding: 30px 20px; }
+        .tab-nav {
             display: flex;
-            border-bottom: 2px solid #e9ecef;
-            background: white;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-
-        .tab-button {
-            flex: 1;
-            padding: 20px;
-            text-align: center;
-            background: none;
-            border: none;
-            font-size: 1.05em;
-            font-weight: 600;
-            color: #666;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border-bottom: 3px solid transparent;
-            margin-bottom: -2px;
-        }
-
-        .tab-button:hover {
-            background: #f8f9fa;
-            color: #667eea;
-        }
-
-        .tab-button.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
-        }
-
-        .tab-content {
-            display: none;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .content {
-            padding: 30px;
-        }
-
-        .region-card {
-            background: white;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 20px;
+            gap: 8px;
             margin-bottom: 20px;
-            transition: box-shadow 0.3s ease;
-        }
-
-        .region-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-
-        .region-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #f0f0f0;
+            flex-wrap: wrap;
+            border-bottom: 2px solid #ddd;
             padding-bottom: 10px;
         }
-
-        .region-name {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #333;
-        }
-
-        .status-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
+        .tab-nav button {
+            padding: 10px 16px;
+            font-size: 0.95em;
             font-weight: 600;
-            text-transform: uppercase;
+            border: none;
+            background: #f0f0f0;
+            color: #111;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-
-        .status-thriving {
-            background: #d4edda;
-            color: #155724;
+        .tab-nav button.active {
+            background: #111;
+            color: white;
         }
-
-        .status-watch {
-            background: #fff3cd;
-            color: #856404;
+        .tab-nav button:hover {
+            background: #ddd;
         }
-
-        .status-atrisk {
-            background: #f8d7da;
-            color: #721c24;
+        .tab-nav button.active:hover {
+            background: #222;
         }
-
-        .center-item {
-            background: #f8f9fa;
-            padding: 12px;
-            margin: 8px 0;
-            border-left: 4px solid #667eea;
-            border-radius: 4px;
-        }
-
-        .metric-grid {
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .metrics-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
-            margin-top: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
         }
-
-        .metric {
-            text-align: center;
-            padding: 10px;
+        .metric-card {
             background: white;
+            border: 1px solid #ddd;
             border-radius: 6px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-
-        .metric-value {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #667eea;
-        }
-
-        .metric-label {
-            font-size: 0.85em;
+        .metric-card .label {
+            font-size: 0.8em;
             color: #666;
-            margin-top: 5px;
-        }
-
-        .program-card {
-            background: #f8f9fa;
-            border-left: 4px solid #764ba2;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-        }
-
-        .program-name {
-            font-weight: bold;
-            font-size: 1.1em;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .ticket {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            padding: 15px;
-            margin-bottom: 12px;
-            border-radius: 6px;
-            border-left: 4px solid #667eea;
-        }
-
-        .ticket.resolved {
-            opacity: 0.7;
-            border-left-color: #28a745;
-        }
-
-        .ticket-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
             margin-bottom: 8px;
         }
-
-        .ticket-id {
-            font-weight: bold;
-            color: #667eea;
+        .metric-card .value {
+            font-size: 2em;
+            font-weight: 800;
+            margin-bottom: 4px;
         }
-
-        .ticket-status {
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-open {
-            background: #e7f3ff;
-            color: #0050b3;
-        }
-
-        .status-in_progress {
-            background: #fff7e6;
-            color: #ad6800;
-        }
-
-        .status-resolved {
-            background: #f6ffed;
-            color: #274000;
-        }
-
-        .compliance-check {
-            background: #f8f9fa;
-            padding: 12px;
-            margin: 8px 0;
-            border-radius: 4px;
-            border-left: 4px solid #28a745;
-        }
-
-        .footer {
-            text-align: center;
-            padding: 20px;
-            background: #f8f9fa;
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
+        .metric-card .sublabel {
+            font-size: 0.75em;
             color: #999;
         }
-
+        .metric-card.success .value { color: #2fbf5f; }
+        .metric-card.warning .value { color: #d9a520; }
+        .metric-card.danger .value { color: #e03535; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        table thead {
+            background: #f8f8f8;
+            border-bottom: 2px solid #ddd;
+        }
+        table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 700;
+            font-size: 0.85em;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        table td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+        table tr:hover { background: #f9f9f9; }
+        table tbody tr:last-child td { border-bottom: none; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .status-open { background: #e03535; color: white; }
+        .status-qualified { background: #d9a520; color: white; }
+        .status-signed { background: #2fbf5f; color: white; }
+        .status-opening { background: #6fe8ff; color: #111; }
+        .status-opened { background: #2fbf5f; color: white; }
+        .status-profitable { background: #2fbf5f; color: white; }
+        .status-breaking-even { background: #d9a520; color: white; }
+        .status-losing-money { background: #e03535; color: white; }
+        .status-growing { color: #2fbf5f; font-weight: 700; }
+        .status-flat { color: #d9a520; font-weight: 700; }
+        .status-declining { color: #e03535; font-weight: 700; }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #eee;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 6px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #2fbf5f;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        .section-title {
+            font-size: 1.3em;
+            font-weight: 700;
+            margin-bottom: 16px;
+            margin-top: 24px;
+            color: #111;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 8px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            color: #666;
+            text-align: center;
+            font-size: 0.9em;
+        }
         @media (max-width: 768px) {
-            header h1 { font-size: 1.8em; }
-            .summary { grid-template-columns: 1fr 1fr; }
-            .metric-grid { grid-template-columns: 1fr 1fr; }
-            .tabs { flex-wrap: wrap; }
-            .tab-button { flex: 1 0 50%; }
+            header h1 { font-size: 1.6em; }
+            .metrics-grid { grid-template-columns: 1fr; }
+            table { font-size: 0.85em; }
+            table th, table td { padding: 8px; }
         }
     </style>
 </head>
 <body>
+    <header>
+        <h1>🎨 Building Kidz Worldwide</h1>
+        <p>Franchise Growth Command Center — 100-Center Network Governance</p>
+    </header>
+
     <div class="container">
-        <header>
-            <h1>🚀 Building Kidz Worldwide Franchise Engine</h1>
-            <p>Real-time Operations Dashboard</p>
-        </header>
-
-        <div class="summary" id="summary">
-            <!-- Generated by JavaScript -->
-        </div>
-
-        <div class="tabs">
-            <button class="tab-button active" onclick="switchTab('network')">📍 Network</button>
-            <button class="tab-button" onclick="switchTab('programs')">📚 Programs</button>
-            <button class="tab-button" onclick="switchTab('support')">🆘 Support</button>
-            <button class="tab-button" onclick="switchTab('record')">📋 Record</button>
-        </div>
-
-        <div id="network" class="tab-content active">
-            <div class="content" id="network-content">
-                <!-- Generated by JavaScript -->
+        <div class="content">
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="growth">Growth Command</button>
+                <button class="tab-btn" data-tab="enrollment">Enrollment Performance</button>
+                <button class="tab-btn" data-tab="launch">Launch & Marketing</button>
+                <button class="tab-btn" data-tab="franchisee">Franchisee Health</button>
+                <button class="tab-btn" data-tab="expansion">Expansion Strategy</button>
             </div>
-        </div>
 
-        <div id="programs" class="tab-content">
-            <div class="content" id="programs-content">
-                <!-- Generated by JavaScript -->
+            <!-- GROWTH COMMAND TAB -->
+            <div id="growth" class="tab-content active">
+                <h2 class="section-title">Franchisee Growth Command Center</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card success">
+                        <div class="label">Pipeline: Inquiry → Opened</div>
+                        <div class="value">9</div>
+                        <div class="sublabel">total prospects</div>
+                        <div style="font-size: 0.75em; margin-top: 8px; color: #666;">
+                            <span style="color: #2fbf5f; font-weight: 700;">2</span> signed ·
+                            <span style="color: #d9a520; font-weight: 700; margin-left: 4px;">1</span> opening ·
+                            <span style="font-weight: 700; margin-left: 4px;">2</span> opened
+                        </div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Enrollment: Inquiry→Enrollment</div>
+                        <div class="value">62.0%</div>
+                        <div class="sublabel">network-wide conversion (target: 50-75%)</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Launch Success: 90-Day Targets</div>
+                        <div class="value">4/5</div>
+                        <div class="sublabel">launches hitting ≥60% target</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Marketing ROI</div>
+                        <div class="value">96%</div>
+                        <div class="sublabel">average across all channels</div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">Active Franchisee Prospects (In Pipeline)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Company</th>
+                            <th>Contact</th>
+                            <th>Status</th>
+                            <th>Territory</th>
+                            <th>Projected Open</th>
+                            <th>Investment</th>
+                            <th>Last Contact</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Learning Stars LLC</strong></td>
+                            <td>Sarah Mitchell</td>
+                            <td><span class="status-badge status-opening">opening</span></td>
+                            <td>TX</td>
+                            <td>2026-09-01</td>
+                            <td>500k-1m</td>
+                            <td>2026-07-20</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Early Excellence Education</strong></td>
+                            <td>Michael Chen</td>
+                            <td><span class="status-badge status-signed">signed</span></td>
+                            <td>CA</td>
+                            <td>2027-03-01</td>
+                            <td>500k-1m</td>
+                            <td>2026-07-18</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Bright Futures Development</strong></td>
+                            <td>Jennifer Walsh</td>
+                            <td><span class="status-badge status-signed">signed</span></td>
+                            <td>FL</td>
+                            <td>2027-02-15</td>
+                            <td>250k-500k</td>
+                            <td>2026-07-15</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Creative Kids Network</strong></td>
+                            <td>David Rodriguez</td>
+                            <td><span class="status-badge status-negotiation">negotiation</span></td>
+                            <td>NY</td>
+                            <td>None</td>
+                            <td>500k-1m</td>
+                            <td>2026-07-10</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Academic Pathways Group</strong></td>
+                            <td>Patricia Lee</td>
+                            <td><span class="status-badge status-qualified">qualified</span></td>
+                            <td>PA</td>
+                            <td>None</td>
+                            <td>250k-500k</td>
+                            <td>2026-07-05</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Innovation Learning Centers</strong></td>
+                            <td>Robert Thompson</td>
+                            <td><span class="status-badge status-inquiry">inquiry</span></td>
+                            <td>IL</td>
+                            <td>None</td>
+                            <td>over-1m</td>
+                            <td>2026-07-01</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Youth Growth Foundation</strong></td>
+                            <td>Amanda Martinez</td>
+                            <td><span class="status-badge status-inquiry">inquiry</span></td>
+                            <td>GA</td>
+                            <td>None</td>
+                            <td>250k-500k</td>
+                            <td>2026-06-28</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Metropolitan Education Trust</strong></td>
+                            <td>James Porter</td>
+                            <td><span class="status-badge status-opened">opened</span></td>
+                            <td>TX</td>
+                            <td>2026-03-01</td>
+                            <td>500k-1m</td>
+                            <td>2026-07-20</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Western Star Academies</strong></td>
+                            <td>Lisa Anderson</td>
+                            <td><span class="status-badge status-opened">opened</span></td>
+                            <td>CA</td>
+                            <td>2026-05-15</td>
+                            <td>500k-1m</td>
+                            <td>2026-07-21</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-        <div id="support" class="tab-content">
-            <div class="content" id="support-content">
-                <!-- Generated by JavaScript -->
+            <!-- ENROLLMENT PERFORMANCE TAB -->
+            <div id="enrollment" class="tab-content">
+                <h2 class="section-title">Network Enrollment Performance</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card success">
+                        <div class="label">Total Enrolled</div>
+                        <div class="value">290</div>
+                        <div class="sublabel">students across all centers</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Monthly Inquiries</div>
+                        <div class="value">84</div>
+                        <div class="sublabel">parent inquiries this month</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Avg Capacity</div>
+                        <div class="value">63.0%</div>
+                        <div class="sublabel">utilization (target: 70-85%)</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Monthly Revenue</div>
+                        <div class="value">$216k</div>
+                        <div class="sublabel">total tuition revenue</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Franchisee Satisfaction</div>
+                        <div class="value">7.6/10</div>
+                        <div class="sublabel">average satisfaction score</div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">Center-Level Enrollment Metrics</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Center</th>
+                            <th>Enrolled</th>
+                            <th>Monthly Inquiries</th>
+                            <th>Conversion %</th>
+                            <th>Capacity %</th>
+                            <th>Monthly Revenue</th>
+                            <th>Franchisee Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Building Kidz — Austin</strong></td>
+                            <td>72</td>
+                            <td>18</td>
+                            <td><strong style="color: #2fbf5f">72%</strong></td>
+                            <td>80%</td>
+                            <td><strong>$54.0k</strong></td>
+                            <td><strong style="color: #2fbf5f">8.8/10</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Building Kidz — Bay Area</strong></td>
+                            <td>78</td>
+                            <td>22</td>
+                            <td><strong style="color: #2fbf5f">68%</strong></td>
+                            <td>82%</td>
+                            <td><strong>$58.0k</strong></td>
+                            <td><strong style="color: #2fbf5f">8.9/10</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Building Kidz — Miami</strong></td>
+                            <td>52</td>
+                            <td>14</td>
+                            <td><strong style="color: #2fbf5f">62%</strong></td>
+                            <td>69%</td>
+                            <td><strong>$38.0k</strong></td>
+                            <td><strong style="color: #2fbf5f">7.5/10</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Building Kidz — Manhattan</strong></td>
+                            <td>48</td>
+                            <td>16</td>
+                            <td><strong style="color: #2fbf5f">65%</strong></td>
+                            <td>60%</td>
+                            <td><strong>$36.0k</strong></td>
+                            <td><strong style="color: #d9a520">7.3/10</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Building Kidz — Philadelphia</strong></td>
+                            <td>22</td>
+                            <td>8</td>
+                            <td><strong style="color: #2fbf5f">55%</strong></td>
+                            <td>37%</td>
+                            <td><strong>$16.0k</strong></td>
+                            <td><strong style="color: #d9a520">6.8/10</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Building Kidz — Chicago</strong></td>
+                            <td>18</td>
+                            <td>6</td>
+                            <td><strong style="color: #2fbf5f">50%</strong></td>
+                            <td>30%</td>
+                            <td><strong>$13.5k</strong></td>
+                            <td><strong style="color: #d9a520">6.5/10</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-        <div id="record" class="tab-content">
-            <div class="content" id="record-content">
-                <!-- Generated by JavaScript -->
+            <!-- LAUNCH & MARKETING TAB -->
+            <div id="launch" class="tab-content">
+                <h2 class="section-title">Launch Success & Marketing Performance</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card success">
+                        <div class="label">Launch Success Rate</div>
+                        <div class="value">80%</div>
+                        <div class="sublabel">4/5 launches on-track (≥60%)</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">At-Risk Launches</div>
+                        <div class="value">0</div>
+                        <div class="sublabel">need intervention (&lt;40% target)</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Total Marketing Budget</div>
+                        <div class="value">$34k</div>
+                        <div class="sublabel">across all channels this period</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Cost Per Inquiry</div>
+                        <div class="value">$101</div>
+                        <div class="sublabel">blended (target: $60-$150)</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Best Channel</div>
+                        <div class="value">digital</div>
+                        <div class="sublabel">highest ROI performer</div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">Launch Success Tracking (90-Day Targets)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Center</th>
+                            <th>Grand Opening</th>
+                            <th>90-Day Target</th>
+                            <th>@30 Days</th>
+                            <th>@60 Days</th>
+                            <th>@90 Days</th>
+                            <th>Vs Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>BK-TX-001</strong></td>
+                            <td style="font-size: 0.8em;">2026-03-01</td>
+                            <td>65</td>
+                            <td>28</td>
+                            <td>52</td>
+                            <td><strong>72</strong></td>
+                            <td><strong style="color: #2fbf5f">111%</strong></td>
+                            <td><span class="status-badge" style="background: #2fbf5f; color: white;">active</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>BK-CA-001</strong></td>
+                            <td style="font-size: 0.8em;">2026-05-15</td>
+                            <td>70</td>
+                            <td>32</td>
+                            <td>61</td>
+                            <td><strong>78</strong></td>
+                            <td><strong style="color: #2fbf5f">111%</strong></td>
+                            <td><span class="status-badge" style="background: #2fbf5f; color: white;">active</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>BK-FL-001</strong></td>
+                            <td style="font-size: 0.8em;">2025-03-01</td>
+                            <td>60</td>
+                            <td>22</td>
+                            <td>40</td>
+                            <td><strong>52</strong></td>
+                            <td><strong style="color: #2fbf5f">87%</strong></td>
+                            <td><span class="status-badge" style="background: #2fbf5f; color: white;">active</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>BK-NY-001</strong></td>
+                            <td style="font-size: 0.8em;">2025-06-01</td>
+                            <td>55</td>
+                            <td>18</td>
+                            <td>35</td>
+                            <td><strong>48</strong></td>
+                            <td><strong style="color: #2fbf5f">87%</strong></td>
+                            <td><span class="status-badge" style="background: #2fbf5f; color: white;">active</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>BK-PA-001</strong></td>
+                            <td style="font-size: 0.8em;">2026-01-15</td>
+                            <td>50</td>
+                            <td>12</td>
+                            <td>18</td>
+                            <td><strong>22</strong></td>
+                            <td><strong style="color: #d9a520">44%</strong></td>
+                            <td><span class="status-badge" style="background: #d9a520; color: white;">launching</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3 class="section-title">Marketing Campaign ROI by Channel</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Campaign</th>
+                            <th>Channel</th>
+                            <th>Budget</th>
+                            <th>Inquiries</th>
+                            <th>CPI</th>
+                            <th>Conversions</th>
+                            <th>ROI %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Google/Facebook Paid Search — Texas</strong></td>
+                            <td>Digital</td>
+                            <td>$8.0k</td>
+                            <td>68</td>
+                            <td><strong>$118</strong></td>
+                            <td>44</td>
+                            <td><strong style="color: #2fbf5f">112%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Google/Facebook Paid Search — California</strong></td>
+                            <td>Digital</td>
+                            <td>$9.5k</td>
+                            <td>72</td>
+                            <td><strong>$132</strong></td>
+                            <td>48</td>
+                            <td><strong style="color: #2fbf5f">108%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Local SEO + GMB Optimization</strong></td>
+                            <td>Local</td>
+                            <td>$4.0k</td>
+                            <td>58</td>
+                            <td><strong>$69</strong></td>
+                            <td>32</td>
+                            <td><strong style="color: #d9a520">94%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Community Events + Sponsorships</strong></td>
+                            <td>Events</td>
+                            <td>$6.0k</td>
+                            <td>45</td>
+                            <td><strong>$133</strong></td>
+                            <td>24</td>
+                            <td><strong style="color: #d9a520">76%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>School Partnerships + Cross-Promo</strong></td>
+                            <td>Partnerships</td>
+                            <td>$5.0k</td>
+                            <td>62</td>
+                            <td><strong>$81</strong></td>
+                            <td>38</td>
+                            <td><strong style="color: #2fbf5f">107%</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Franchisee Word-of-Mouth + Referrals</strong></td>
+                            <td>Franchisee Run</td>
+                            <td>$2.0k</td>
+                            <td>38</td>
+                            <td><strong>$53</strong></td>
+                            <td>28</td>
+                            <td><strong style="color: #d9a520">78%</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-        <div class="footer">
-            Generated by Franchise Engine · 2026-07-28
+            <!-- FRANCHISEE HEALTH TAB -->
+            <div id="franchisee" class="tab-content">
+                <h2 class="section-title">Franchisee Health & Support</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="label">Total Franchisees</div>
+                        <div class="value">5</div>
+                        <div class="sublabel">operating centers in network</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Profitable</div>
+                        <div class="value">40%</div>
+                        <div class="sublabel">2/5 franchisees</div>
+                    </div>
+
+                    <div class="metric-card danger">
+                        <div class="label">At-Risk</div>
+                        <div class="value">2</div>
+                        <div class="sublabel">need intervention or support</div>
+                    </div>
+
+                    <div class="metric-card success">
+                        <div class="label">Avg Satisfaction</div>
+                        <div class="value">7.9/10</div>
+                        <div class="sublabel">franchisee satisfaction score</div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">Franchisee Performance & Health Status</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Franchisee ID</th>
+                            <th>Territory</th>
+                            <th>Months Operating</th>
+                            <th>Trajectory</th>
+                            <th>Profitability</th>
+                            <th>Satisfaction</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>FK-008</strong></td>
+                            <td>TX</td>
+                            <td>16</td>
+                            <td><strong class="status-growing">Growing</strong></td>
+                            <td><span class="status-profitable" style="color: inherit; background: none;">Profitable</span></td>
+                            <td><strong>8.8/10</strong></td>
+                            <td><strong style="color: #2fbf5f">OK</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>FK-009</strong></td>
+                            <td>CA</td>
+                            <td>14</td>
+                            <td><strong class="status-growing">Growing</strong></td>
+                            <td><span class="status-profitable" style="color: inherit; background: none;">Profitable</span></td>
+                            <td><strong>8.9/10</strong></td>
+                            <td><strong style="color: #2fbf5f">OK</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>FK-003</strong></td>
+                            <td>FL</td>
+                            <td>10</td>
+                            <td><strong class="status-growing">Growing</strong></td>
+                            <td><span class="status-breaking-even" style="color: inherit; background: none;">Breaking Even</span></td>
+                            <td><strong>7.5/10</strong></td>
+                            <td><strong style="color: #2fbf5f">OK</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>FK-004</strong></td>
+                            <td>NY</td>
+                            <td>7</td>
+                            <td><strong class="status-flat">Flat</strong></td>
+                            <td><span class="status-losing-money" style="color: inherit; background: none;">Losing Money</span></td>
+                            <td><strong>7.3/10</strong></td>
+                            <td><strong style="color: #e03535">AT-RISK</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>FK-005</strong></td>
+                            <td>PA</td>
+                            <td>2</td>
+                            <td><strong class="status-growing">Growing</strong></td>
+                            <td><span class="status-losing-money" style="color: inherit; background: none;">Losing Money</span></td>
+                            <td><strong>6.8/10</strong></td>
+                            <td><strong style="color: #e03535">AT-RISK</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- EXPANSION STRATEGY TAB -->
+            <div id="expansion" class="tab-content">
+                <h2 class="section-title">Geographic Expansion Strategy</h2>
+
+                <div class="metrics-grid">
+                    <div class="metric-card" id="progress-card">
+                        <div class="label">Progress to 100 Centers</div>
+                        <div class="value" id="progress-value">0/100</div>
+                        <div class="sublabel" id="progress-pct">0% of target</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Top Territory</div>
+                        <div class="value" id="top-territory">—</div>
+                        <div class="sublabel" id="top-territory-count">0 centers</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="label">Biggest Gap</div>
+                        <div class="value" id="gap-territory">—</div>
+                        <div class="sublabel" id="gap-count">0 centers needed</div>
+                    </div>
+                </div>
+
+                <h3 class="section-title">Current vs. Target Centers by Territory</h3>
+                <table id="expansion-table">
+                    <thead>
+                        <tr>
+                            <th>State</th>
+                            <th>Current</th>
+                            <th>Target</th>
+                            <th>Gap</th>
+                            <th>% of Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="footer">
+                <p><strong>Building Kidz Worldwide</strong> — Franchise Growth Command Center</p>
+                <p>Real-time visibility into franchisee pipeline, enrollment performance, launch success, marketing ROI, and franchisee health across the network.</p>
+                <p style="margin-top: 12px; font-size: 0.85em; opacity: 0.8;">Generated by Building Kidz Growth Engine • Data as of {engine_data['summaries']['enrollment']['total_enrolled']} students enrolled</p>
+            </div>
         </div>
     </div>
 
     <script>
-        const engineData = {"brand_name": "Building Kidz Worldwide", "mission": "Inspire creativity, confidence, and a love of learning in young children through integrated academics and performing arts.", "created_at": "2026-07-28T19:37:04.425097", "regions": {"mid_atlantic": {"label": "Mid-Atlantic (DC, MD, VA)", "centers": [{"name": "Building Kidz \u2014 Washington DC", "region": "mid_atlantic", "state": "DC", "address": "2100 Pennsylvania Ave NW, Washington, DC 20037", "health": 88.0, "total_enrollment": 127, "age_groups_served": 3, "staff_count": 11, "instructor_experience_avg": 6.2, "team_cohesion": 86.0, "enrollment_conversion": 0.76, "average_class_size": 12.5, "parent_satisfaction": 92.0, "instructor_retention": 94.0, "monthly_revenue": 42500.0, "margin_percentage": 18.5, "programs_offered": ["creative_arts_foundation", "performing_arts", "enrichment_workshops"], "verified": true, "last_audit": "2024-06-15", "created_at": "2026-07-28T19:37:04.425272"}, {"name": "Building Kidz \u2014 Baltimore", "region": "mid_atlantic", "state": "MD", "address": null, "health": 74.0, "total_enrollment": 89, "age_groups_served": 3, "staff_count": 8, "instructor_experience_avg": 4.1, "team_cohesion": 72.0, "enrollment_conversion": 0.68, "average_class_size": 11.0, "parent_satisfaction": 85.0, "instructor_retention": 80.0, "monthly_revenue": 28300.0, "margin_percentage": 14.2, "programs_offered": ["creative_arts_foundation"], "verified": true, "last_audit": "2024-05-20", "created_at": "2026-07-28T19:37:04.425281"}], "metrics": {"enrollment_conversion": 0.72, "parent_satisfaction": 88.5, "team_cohesion": 79.0, "instructor_retention": 87.0}}, "southeast": {"label": "Southeast (GA, NC, SC)", "centers": [{"name": "Building Kidz \u2014 Atlanta", "region": "southeast", "state": "GA", "address": null, "health": 82.0, "total_enrollment": 145, "age_groups_served": 3, "staff_count": 13, "instructor_experience_avg": 5.8, "team_cohesion": 84.0, "enrollment_conversion": 0.73, "average_class_size": 13.0, "parent_satisfaction": 89.0, "instructor_retention": 88.0, "monthly_revenue": 48900.0, "margin_percentage": 17.8, "programs_offered": ["creative_arts_foundation", "stem_integration", "enrichment_workshops"], "verified": true, "last_audit": "2024-07-01", "created_at": "2026-07-28T19:37:04.425289"}, {"name": "Building Kidz \u2014 Charlotte", "region": "southeast", "state": "NC", "address": null, "health": 76.0, "total_enrollment": 103, "age_groups_served": 3, "staff_count": 9, "instructor_experience_avg": 3.5, "team_cohesion": 75.0, "enrollment_conversion": 0.65, "average_class_size": 11.5, "parent_satisfaction": 83.0, "instructor_retention": 82.0, "monthly_revenue": 34700.0, "margin_percentage": 15.1, "programs_offered": ["creative_arts_foundation", "enrichment_workshops"], "verified": true, "last_audit": "2024-06-10", "created_at": "2026-07-28T19:37:04.425293"}, {"name": "Building Kidz \u2014 Charleston", "region": "southeast", "state": "SC", "address": null, "health": 58.0, "total_enrollment": 62, "age_groups_served": 3, "staff_count": 6, "instructor_experience_avg": 2.3, "team_cohesion": 62.0, "enrollment_conversion": 0.52, "average_class_size": 9.5, "parent_satisfaction": 75.0, "instructor_retention": 68.0, "monthly_revenue": 18500.0, "margin_percentage": 8.5, "programs_offered": ["creative_arts_foundation"], "verified": false, "last_audit": "2024-03-15", "created_at": "2026-07-28T19:37:04.425296"}], "metrics": {"enrollment_conversion": 0.6333333333333333, "parent_satisfaction": 82.33333333333333, "team_cohesion": 73.66666666666667, "instructor_retention": 79.33333333333333}}, "midwest": {"label": "Midwest (IL, MI, OH)", "centers": [{"name": "Building Kidz \u2014 Chicago", "region": "midwest", "state": "IL", "address": null, "health": 86.0, "total_enrollment": 156, "age_groups_served": 3, "staff_count": 14, "instructor_experience_avg": 6.7, "team_cohesion": 87.0, "enrollment_conversion": 0.75, "average_class_size": 13.5, "parent_satisfaction": 91.0, "instructor_retention": 92.0, "monthly_revenue": 51200.0, "margin_percentage": 19.2, "programs_offered": ["creative_arts_foundation", "performing_arts", "stem_integration", "enrichment_workshops"], "verified": true, "last_audit": "2024-07-08", "created_at": "2026-07-28T19:37:04.425300"}, {"name": "Building Kidz \u2014 Ann Arbor", "region": "midwest", "state": "MI", "address": null, "health": 79.0, "total_enrollment": 95, "age_groups_served": 3, "staff_count": 9, "instructor_experience_avg": 4.4, "team_cohesion": 78.0, "enrollment_conversion": 0.7, "average_class_size": 12.0, "parent_satisfaction": 87.0, "instructor_retention": 85.0, "monthly_revenue": 32100.0, "margin_percentage": 16.3, "programs_offered": ["creative_arts_foundation", "enrichment_workshops"], "verified": true, "last_audit": "2024-06-22", "created_at": "2026-07-28T19:37:04.425304"}], "metrics": {"enrollment_conversion": 0.725, "parent_satisfaction": 89.0, "team_cohesion": 82.5, "instructor_retention": 88.5}}, "southwest": {"label": "Southwest (TX, AZ)", "centers": [{"name": "Building Kidz \u2014 Austin", "region": "southwest", "state": "TX", "address": null, "health": 84.0, "total_enrollment": 138, "age_groups_served": 3, "staff_count": 12, "instructor_experience_avg": 5.5, "team_cohesion": 83.0, "enrollment_conversion": 0.74, "average_class_size": 12.8, "parent_satisfaction": 90.0, "instructor_retention": 89.0, "monthly_revenue": 46800.0, "margin_percentage": 18.1, "programs_offered": ["creative_arts_foundation", "stem_integration", "enrichment_workshops"], "verified": true, "last_audit": "2024-07-05", "created_at": "2026-07-28T19:37:04.425309"}, {"name": "Building Kidz \u2014 Phoenix", "region": "southwest", "state": "AZ", "address": null, "health": 72.0, "total_enrollment": 81, "age_groups_served": 3, "staff_count": 7, "instructor_experience_avg": 3.2, "team_cohesion": 70.0, "enrollment_conversion": 0.62, "average_class_size": 11.0, "parent_satisfaction": 80.0, "instructor_retention": 76.0, "monthly_revenue": 27500.0, "margin_percentage": 12.8, "programs_offered": ["creative_arts_foundation"], "verified": true, "last_audit": "2024-04-30", "created_at": "2026-07-28T19:37:04.425318"}], "metrics": {"enrollment_conversion": 0.6799999999999999, "parent_satisfaction": 85.0, "team_cohesion": 76.5, "instructor_retention": 82.5}}, "west_coast": {"label": "West Coast (CA, WA)", "centers": [{"name": "Building Kidz \u2014 San Francisco Bay Area", "region": "west_coast", "state": "CA", "address": null, "health": 87.0, "total_enrollment": 142, "age_groups_served": 3, "staff_count": 13, "instructor_experience_avg": 6.1, "team_cohesion": 85.0, "enrollment_conversion": 0.77, "average_class_size": 13.2, "parent_satisfaction": 93.0, "instructor_retention": 91.0, "monthly_revenue": 49700.0, "margin_percentage": 19.5, "programs_offered": ["creative_arts_foundation", "performing_arts", "stem_integration"], "verified": true, "last_audit": "2024-07-12", "created_at": "2026-07-28T19:37:04.425322"}, {"name": "Building Kidz \u2014 Seattle", "region": "west_coast", "state": "WA", "address": null, "health": 80.0, "total_enrollment": 112, "age_groups_served": 3, "staff_count": 10, "instructor_experience_avg": 5.0, "team_cohesion": 81.0, "enrollment_conversion": 0.71, "average_class_size": 12.0, "parent_satisfaction": 88.0, "instructor_retention": 86.0, "monthly_revenue": 38200.0, "margin_percentage": 16.9, "programs_offered": ["creative_arts_foundation", "enrichment_workshops"], "verified": true, "last_audit": "2024-06-28", "created_at": "2026-07-28T19:37:04.425325"}], "metrics": {"enrollment_conversion": 0.74, "parent_satisfaction": 90.5, "team_cohesion": 83.0, "instructor_retention": 88.5}}}, "programs": {"BK-101": {"program_id": "BK-101", "name": "Creative Arts Foundation", "program_type": "creative_arts_foundation", "age_groups": ["Toddler", "Preschool", "PreK"], "centers_offering": ["Building Kidz \u2014 Washington DC", "Building Kidz \u2014 Baltimore", "Building Kidz \u2014 Atlanta", "Building Kidz \u2014 Charlotte", "Building Kidz \u2014 Charleston", "Building Kidz \u2014 Chicago", "Building Kidz \u2014 Ann Arbor", "Building Kidz \u2014 Austin", "Building Kidz \u2014 Phoenix", "Building Kidz \u2014 San Francisco Bay Area", "Building Kidz \u2014 Seattle"], "total_enrollment": 1015, "instructor_count": 93, "monthly_revenue": 320000.0}, "BK-201": {"program_id": "BK-201", "name": "Performing Arts Integration", "program_type": "performing_arts", "age_groups": ["Preschool", "PreK"], "centers_offering": ["Building Kidz \u2014 Washington DC", "Building Kidz \u2014 Chicago", "Building Kidz \u2014 San Francisco Bay Area"], "total_enrollment": 187, "instructor_count": 18, "monthly_revenue": 58000.0}, "BK-301": {"program_id": "BK-301", "name": "STEM Integration Workshop", "program_type": "stem_integration", "age_groups": ["Preschool", "PreK"], "centers_offering": ["Building Kidz \u2014 Atlanta", "Building Kidz \u2014 Chicago", "Building Kidz \u2014 Austin", "Building Kidz \u2014 San Francisco Bay Area"], "total_enrollment": 142, "instructor_count": 16, "monthly_revenue": 43000.0}, "BK-401": {"program_id": "BK-401", "name": "Enrichment Workshops", "program_type": "enrichment_workshops", "age_groups": ["Toddler", "Preschool", "PreK"], "centers_offering": ["Building Kidz \u2014 Washington DC", "Building Kidz \u2014 Charlotte", "Building Kidz \u2014 Chicago", "Building Kidz \u2014 Ann Arbor", "Building Kidz \u2014 Austin", "Building Kidz \u2014 Seattle"], "total_enrollment": 268, "instructor_count": 28, "monthly_revenue": 82000.0}}, "support_tickets": [{"ticket_id": "BK-1000", "center_name": "Building Kidz \u2014 Washington DC", "category": "curriculum", "status": "resolved", "created_at": "2026-07-28T19:37:04.425399", "resolved_at": "2026-07-25T19:37:04.425345", "notes": "Need resources for seasonal arts integration"}, {"ticket_id": "BK-1001", "center_name": "Building Kidz \u2014 Baltimore", "category": "staff", "status": "in_progress", "created_at": "2026-07-28T19:37:04.425422", "resolved_at": null, "notes": "Instructor development workshop needed"}, {"ticket_id": "BK-1002", "center_name": "Building Kidz \u2014 Charleston", "category": "operations", "status": "open", "created_at": "2026-07-28T19:37:04.425425", "resolved_at": null, "notes": "Enrollment marketing strategy review"}, {"ticket_id": "BK-1003", "center_name": "Building Kidz \u2014 Chicago", "category": "technology", "status": "resolved", "created_at": "2026-07-28T19:37:04.425427", "resolved_at": "2026-07-23T19:37:04.425345", "notes": "Platform update for registration system"}, {"ticket_id": "BK-1004", "center_name": "Building Kidz \u2014 Austin", "category": "compliance", "status": "open", "created_at": "2026-07-28T19:37:04.425431", "resolved_at": null, "notes": "Updated FDD documentation review"}, {"ticket_id": "BK-1005", "center_name": "Building Kidz \u2014 Phoenix", "category": "curriculum", "status": "in_progress", "created_at": "2026-07-28T19:37:04.425433", "resolved_at": null, "notes": "STEM program expansion consultation"}], "compliance_records": [{"center_name": "Building Kidz \u2014 Washington DC", "verification_status": "verified", "last_audit": "2024-06-15", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Baltimore", "verification_status": "verified", "last_audit": "2024-05-20", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Atlanta", "verification_status": "verified", "last_audit": "2024-07-01", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Charlotte", "verification_status": "verified", "last_audit": "2024-06-10", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Charleston", "verification_status": "flagged", "last_audit": "2024-03-15", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Remediation in progress"}, {"center_name": "Building Kidz \u2014 Chicago", "verification_status": "verified", "last_audit": "2024-07-08", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Ann Arbor", "verification_status": "verified", "last_audit": "2024-06-22", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Austin", "verification_status": "verified", "last_audit": "2024-07-05", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Phoenix", "verification_status": "verified", "last_audit": "2024-04-30", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 San Francisco Bay Area", "verification_status": "verified", "last_audit": "2024-07-12", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}, {"center_name": "Building Kidz \u2014 Seattle", "verification_status": "verified", "last_audit": "2024-06-28", "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20", "notes": "Full compliance audit completed"}]};
+        const engineData = {"franchisee": {"prospects": [{"prospect_id": "FK-001", "company_name": "Learning Stars LLC", "contact_person": "Sarah Mitchell", "status": "opening", "inquiry_date": "2024-10-15", "territory": "TX", "investment_capacity": "500k_1m", "experience_level": "franchise_veteran", "projected_open_date": "2026-09-01", "notes": null, "last_communication_date": "2026-07-20"}, {"prospect_id": "FK-002", "company_name": "Early Excellence Education", "contact_person": "Michael Chen", "status": "signed", "inquiry_date": "2024-12-01", "territory": "CA", "investment_capacity": "500k_1m", "experience_level": "education_background", "projected_open_date": "2027-03-01", "notes": null, "last_communication_date": "2026-07-18"}, {"prospect_id": "FK-003", "company_name": "Bright Futures Development", "contact_person": "Jennifer Walsh", "status": "signed", "inquiry_date": "2025-03-10", "territory": "FL", "investment_capacity": "250k_500k", "experience_level": "franchise_novice", "projected_open_date": "2027-02-15", "notes": null, "last_communication_date": "2026-07-15"}, {"prospect_id": "FK-004", "company_name": "Creative Kids Network", "contact_person": "David Rodriguez", "status": "negotiation", "inquiry_date": "2025-05-20", "territory": "NY", "investment_capacity": "500k_1m", "experience_level": "franchise_veteran", "projected_open_date": null, "notes": null, "last_communication_date": "2026-07-10"}, {"prospect_id": "FK-005", "company_name": "Academic Pathways Group", "contact_person": "Patricia Lee", "status": "qualified", "inquiry_date": "2026-02-15", "territory": "PA", "investment_capacity": "250k_500k", "experience_level": "franchise_novice", "projected_open_date": null, "notes": null, "last_communication_date": "2026-07-05"}, {"prospect_id": "FK-006", "company_name": "Innovation Learning Centers", "contact_person": "Robert Thompson", "status": "inquiry", "inquiry_date": "2026-06-10", "territory": "IL", "investment_capacity": "over_1m", "experience_level": "education_background", "projected_open_date": null, "notes": null, "last_communication_date": "2026-07-01"}, {"prospect_id": "FK-007", "company_name": "Youth Growth Foundation", "contact_person": "Amanda Martinez", "status": "inquiry", "inquiry_date": "2026-06-25", "territory": "GA", "investment_capacity": "250k_500k", "experience_level": "franchise_novice", "projected_open_date": null, "notes": null, "last_communication_date": "2026-06-28"}, {"prospect_id": "FK-008", "company_name": "Metropolitan Education Trust", "contact_person": "James Porter", "status": "opened", "inquiry_date": "2025-01-20", "territory": "TX", "investment_capacity": "500k_1m", "experience_level": "franchise_veteran", "projected_open_date": "2026-03-01", "notes": null, "last_communication_date": "2026-07-20"}, {"prospect_id": "FK-009", "company_name": "Western Star Academies", "contact_person": "Lisa Anderson", "status": "opened", "inquiry_date": "2025-02-10", "territory": "CA", "investment_capacity": "500k_1m", "experience_level": "education_background", "projected_open_date": "2026-05-15", "notes": null, "last_communication_date": "2026-07-21"}], "performance": [{"franchisee_id": "FK-008", "state": "TX", "months_operating": 16, "enrollment_trajectory": "growing", "profitability_status": "profitable", "satisfaction_score": 8.8, "at_risk": false}, {"franchisee_id": "FK-009", "state": "CA", "months_operating": 14, "enrollment_trajectory": "growing", "profitability_status": "profitable", "satisfaction_score": 8.9, "at_risk": false}, {"franchisee_id": "FK-003", "state": "FL", "months_operating": 10, "enrollment_trajectory": "growing", "profitability_status": "breaking_even", "satisfaction_score": 7.5, "at_risk": false}, {"franchisee_id": "FK-004", "state": "NY", "months_operating": 7, "enrollment_trajectory": "flat", "profitability_status": "losing_money", "satisfaction_score": 7.3, "at_risk": true}, {"franchisee_id": "FK-005", "state": "PA", "months_operating": 2, "enrollment_trajectory": "growing", "profitability_status": "losing_money", "satisfaction_score": 6.8, "at_risk": true}], "pipeline": {"total_prospects": 9, "by_status": {"opening": 1, "signed": 2, "negotiation": 1, "qualified": 1, "inquiry": 2, "opened": 2}, "signed": 2, "opening": 1, "opened": 2}, "health": {"total_franchisees": 5, "profitable_count": 2, "profitable_pct": 40.0, "at_risk_count": 2, "avg_satisfaction": 7.9}}, "enrollment": [{"center_id": "BK-TX-001", "center_name": "Building Kidz \u2014 Austin", "state": "TX", "opening_date": "2024-09-01", "status": "mature", "monthly_inquiries": 18, "inquiry_to_enrollment_conversion_rate": 0.72, "current_enrollment": 72, "capacity": 90, "monthly_tuition_revenue": 54000, "franchisee_satisfaction": 8.8}, {"center_id": "BK-CA-001", "center_name": "Building Kidz \u2014 Bay Area", "state": "CA", "opening_date": "2024-08-15", "status": "mature", "monthly_inquiries": 22, "inquiry_to_enrollment_conversion_rate": 0.68, "current_enrollment": 78, "capacity": 95, "monthly_tuition_revenue": 58000, "franchisee_satisfaction": 8.9}, {"center_id": "BK-FL-001", "center_name": "Building Kidz \u2014 Miami", "state": "FL", "opening_date": "2025-03-01", "status": "operational", "monthly_inquiries": 14, "inquiry_to_enrollment_conversion_rate": 0.62, "current_enrollment": 52, "capacity": 75, "monthly_tuition_revenue": 38000, "franchisee_satisfaction": 7.5}, {"center_id": "BK-NY-001", "center_name": "Building Kidz \u2014 Manhattan", "state": "NY", "opening_date": "2025-06-01", "status": "operational", "monthly_inquiries": 16, "inquiry_to_enrollment_conversion_rate": 0.65, "current_enrollment": 48, "capacity": 80, "monthly_tuition_revenue": 36000, "franchisee_satisfaction": 7.3}, {"center_id": "BK-PA-001", "center_name": "Building Kidz \u2014 Philadelphia", "state": "PA", "opening_date": "2026-01-15", "status": "launching", "monthly_inquiries": 8, "inquiry_to_enrollment_conversion_rate": 0.55, "current_enrollment": 22, "capacity": 60, "monthly_tuition_revenue": 16000, "franchisee_satisfaction": 6.8}, {"center_id": "BK-IL-001", "center_name": "Building Kidz \u2014 Chicago", "state": "IL", "opening_date": "2026-04-01", "status": "launching", "monthly_inquiries": 6, "inquiry_to_enrollment_conversion_rate": 0.5, "current_enrollment": 18, "capacity": 60, "monthly_tuition_revenue": 13500, "franchisee_satisfaction": 6.5}], "launch": [{"center_id": "BK-TX-001", "franchisee_id": "FK-008", "soft_opening_date": "2026-02-15", "grand_opening_date": "2026-03-01", "ninety_day_target": 65, "enrollment_at_30_days": 28, "enrollment_at_60_days": 52, "enrollment_at_90_days": 72, "vs_target_pct": 110.8, "status": "active"}, {"center_id": "BK-CA-001", "franchisee_id": "FK-009", "soft_opening_date": "2026-04-20", "grand_opening_date": "2026-05-15", "ninety_day_target": 70, "enrollment_at_30_days": 32, "enrollment_at_60_days": 61, "enrollment_at_90_days": 78, "vs_target_pct": 111.4, "status": "active"}, {"center_id": "BK-FL-001", "franchisee_id": "FK-003", "soft_opening_date": "2025-02-10", "grand_opening_date": "2025-03-01", "ninety_day_target": 60, "enrollment_at_30_days": 22, "enrollment_at_60_days": 40, "enrollment_at_90_days": 52, "vs_target_pct": 86.7, "status": "active"}, {"center_id": "BK-NY-001", "franchisee_id": "FK-004", "soft_opening_date": "2025-05-10", "grand_opening_date": "2025-06-01", "ninety_day_target": 55, "enrollment_at_30_days": 18, "enrollment_at_60_days": 35, "enrollment_at_90_days": 48, "vs_target_pct": 87.3, "status": "active"}, {"center_id": "BK-PA-001", "franchisee_id": "FK-005", "soft_opening_date": "2026-01-01", "grand_opening_date": "2026-01-15", "ninety_day_target": 50, "enrollment_at_30_days": 12, "enrollment_at_60_days": 18, "enrollment_at_90_days": 22, "vs_target_pct": 44.0, "status": "launching"}], "marketing": [{"campaign_id": "MK-001", "campaign_name": "Google/Facebook Paid Search \u2014 Texas", "channel": "digital", "budget": 8000, "inquiries_generated": 68, "cost_per_inquiry": 117.65, "conversions": 44, "roi_pct": 112.5}, {"campaign_id": "MK-002", "campaign_name": "Google/Facebook Paid Search \u2014 California", "channel": "digital", "budget": 9500, "inquiries_generated": 72, "cost_per_inquiry": 131.94, "conversions": 48, "roi_pct": 108.3}, {"campaign_id": "MK-003", "campaign_name": "Local SEO + GMB Optimization", "channel": "local", "budget": 4000, "inquiries_generated": 58, "cost_per_inquiry": 68.97, "conversions": 32, "roi_pct": 94.2}, {"campaign_id": "MK-004", "campaign_name": "Community Events + Sponsorships", "channel": "events", "budget": 6000, "inquiries_generated": 45, "cost_per_inquiry": 133.33, "conversions": 24, "roi_pct": 76.5}, {"campaign_id": "MK-005", "campaign_name": "School Partnerships + Cross-Promo", "channel": "partnerships", "budget": 5000, "inquiries_generated": 62, "cost_per_inquiry": 80.65, "conversions": 38, "roi_pct": 106.8}, {"campaign_id": "MK-006", "campaign_name": "Franchisee Word-of-Mouth + Referrals", "channel": "franchisee_run", "budget": 2000, "inquiries_generated": 38, "cost_per_inquiry": 52.63, "conversions": 28, "roi_pct": 78.4}], "summaries": {"pipeline": {"total_prospects": 9, "by_status": {"opening": 1, "signed": 2, "negotiation": 1, "qualified": 1, "inquiry": 2, "opened": 2}, "signed": 2, "opening": 1, "opened": 2}, "enrollment": {"total_enrolled": 290, "total_monthly_inquiries": 84, "avg_conversion_rate": 0.62, "total_capacity": 460, "capacity_utilization_pct": 63.0, "total_monthly_revenue": 215500, "avg_franchisee_satisfaction": 7.6, "number_of_centers": 6}, "launch": {"total_launches": 5, "successful_launches": 4, "success_rate_pct": 80.0, "at_risk_launches": 0, "avg_vs_target_pct": 88.0}, "marketing": {"total_campaigns": 6, "total_budget": 34500, "total_inquiries_generated": 343, "avg_cost_per_inquiry": 100.58, "avg_roi_pct": 96.1, "best_channel": "digital", "by_channel": {"digital": {"budget": 17500, "inquiries": 140, "avg_roi_pct": 110.4}, "local": {"budget": 4000, "inquiries": 58, "avg_roi_pct": 94.2}, "events": {"budget": 6000, "inquiries": 45, "avg_roi_pct": 76.5}, "partnerships": {"budget": 5000, "inquiries": 62, "avg_roi_pct": 106.8}, "franchisee_run": {"budget": 2000, "inquiries": 38, "avg_roi_pct": 78.4}}}, "franchisee_health": {"total_franchisees": 5, "profitable_count": 2, "profitable_pct": 40.0, "at_risk_count": 2, "avg_satisfaction": 7.9}}};
 
-        function formatPercent(val) {
-            return Math.round(val * 100) + '%';
-        }
-
-        function renderSummary() {
-            const brand = engineData.brand_name;
-            const regions = Object.keys(engineData.regions).length;
-
-            let total_centers = 0;
-            let total_enrollment = 0;
-            let total_health = 0;
-
-            Object.values(engineData.regions).forEach(r => {
-                total_centers += r.centers.length;
-                total_enrollment += r.centers.reduce((s, c) => s + (c.enrollment || 0), 0);
-                total_health += r.centers.reduce((s, c) => s + (c.health || 0), 0);
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.dataset.tab;
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(tabName).classList.add('active');
             });
-
-            const avgHealth = total_centers > 0 ? (total_health / total_centers) : 0;
-
-            const html = `
-                <div class="stat">
-                    <div class="stat-value">${total_centers}</div>
-                    <div class="stat-label">Active Centers</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value">${total_enrollment.toLocaleString()}</div>
-                    <div class="stat-label">Total Enrollment</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value">${regions}</div>
-                    <div class="stat-label">Regions</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value">${Math.round(avgHealth)}</div>
-                    <div class="stat-label">Network Health</div>
-                </div>
-            `;
-
-            document.getElementById('summary').innerHTML = html;
-        }
-
-        function getStatusClass(status) {
-            return 'status-' + status.replace('-', '');
-        }
-
-        function renderNetwork() {
-            let html = '';
-
-            Object.entries(engineData.regions).forEach(([rid, region]) => {
-                const metrics = region.metrics;
-                const condition = region.centers.length > 0
-                    ? (region.centers.reduce((s, c) => s + c.health, 0) / region.centers.length >= 80 ? 'thriving' : 'watch')
-                    : 'watch';
-
-                html += `
-                    <div class="region-card">
-                        <div class="region-header">
-                            <div class="region-name">${region.label}</div>
-                            <span class="status-badge ${getStatusClass(condition)}">${condition}</span>
-                        </div>
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 10px;">
-                            ${region.centers.length} center(s)
-                        </div>
-                `;
-
-                region.centers.forEach(center => {
-                    html += `
-                        <div class="center-item">
-                            <strong>${center.name}</strong> · Health: ${center.health.toFixed(1)}% ·
-                            Enrollment: ${center.enrollment}
-                        </div>
-                    `;
-                });
-
-                html += `
-                    <div class="metric-grid">
-                        <div class="metric">
-                            <div class="metric-value">${(metrics.engagement * 100).toFixed(0)}%</div>
-                            <div class="metric-label">Engagement</div>
-                        </div>
-                        <div class="metric">
-                            <div class="metric-value">$${(metrics.margin * 100).toFixed(0)}k</div>
-                            <div class="metric-label">Margin</div>
-                        </div>
-                        <div class="metric">
-                            <div class="metric-value">${(metrics.staffing).toFixed(1)}</div>
-                            <div class="metric-label">Staffing</div>
-                        </div>
-                        <div class="metric">
-                            <div class="metric-value">${(metrics.community).toFixed(0)}%</div>
-                            <div class="metric-label">Retention</div>
-                        </div>
-                    </div>
-                    </div>
-                `;
-            });
-
-            if (html === '') {
-                html = '<div class="empty-state">No regions configured</div>';
-            }
-
-            document.getElementById('network-content').innerHTML = html;
-        }
-
-        function renderPrograms() {
-            let html = '';
-
-            Object.values(engineData.programs).forEach(program => {
-                html += `
-                    <div class="program-card">
-                        <div class="program-name">${program.name}</div>
-                        <div style="font-size: 0.9em; color: #666;">
-                            Type: ${program.program_type} ·
-                            Enrollment: ${program.enrollment} ·
-                            Instructors: ${program.instructor_count}
-                        </div>
-                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 0.85em;">
-                            Available at: ${program.centers_offering.join(', ') || 'TBD'}
-                        </div>
-                    </div>
-                `;
-            });
-
-            if (html === '') {
-                html = '<div class="empty-state">No programs configured</div>';
-            }
-
-            document.getElementById('programs-content').innerHTML = html;
-        }
-
-        function renderSupport() {
-            let html = '';
-
-            engineData.support_tickets.forEach(ticket => {
-                const statusClass = 'status-' + ticket.status;
-                html += `
-                    <div class="ticket ${ticket.status === 'resolved' ? 'resolved' : ''}">
-                        <div class="ticket-header">
-                            <div>
-                                <div class="ticket-id">${ticket.ticket_id}</div>
-                                <div style="font-size: 0.9em; color: #666; margin-top: 4px;">
-                                    Center: ${ticket.center_name} · Category: ${ticket.category}
-                                </div>
-                            </div>
-                            <span class="ticket-status ${statusClass}">${ticket.status}</span>
-                        </div>
-                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 0.85em;">
-                            Created: ${new Date(ticket.created_at).toLocaleDateString()}
-                            ${ticket.resolved_at ? ' · Resolved: ' + new Date(ticket.resolved_at).toLocaleDateString() : ''}
-                        </div>
-                        ${ticket.notes ? '<div style="margin-top: 8px; padding: 8px; background: white; border-radius: 4px; font-size: 0.9em;">Notes: ' + ticket.notes + '</div>' : ''}
-                    </div>
-                `;
-            });
-
-            if (html === '') {
-                html = '<div class="empty-state">No support tickets</div>';
-            }
-
-            document.getElementById('support-content').innerHTML = html;
-        }
-
-        function renderRecord() {
-            let html = '<h2 style="margin-bottom: 20px;">FDD Compliance & Audit</h2>';
-
-            engineData.compliance_records.forEach(record => {
-                html += `
-                    <div class="compliance-check">
-                        <div style="font-weight: bold; margin-bottom: 5px;">${record.center_name}</div>
-                        <div style="font-size: 0.9em; color: #666;">
-                            FDD Item 20: <strong>${record.fdd_item_20}</strong> units ·
-                            Status: <strong>${record.verification_status}</strong>
-                            ${record.last_audit ? ' · Last Audit: ' + record.last_audit : ''}
-                        </div>
-                        ${record.notes ? '<div style="margin-top: 5px; font-size: 0.85em; font-style: italic;">' + record.notes + '</div>' : ''}
-                    </div>
-                `;
-            });
-
-            if (html === '<h2 style="margin-bottom: 20px;">FDD Compliance & Audit</h2>') {
-                html += '<div class="empty-state">No compliance records</div>';
-            }
-
-            document.getElementById('record-content').innerHTML = html;
-        }
-
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-
-            document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
-        }
-
-        // Initialize on load
-        document.addEventListener('DOMContentLoaded', () => {
-            renderSummary();
-            renderNetwork();
-            renderPrograms();
-            renderSupport();
-            renderRecord();
         });
+
+        // Populate expansion data
+        function initExpansion() {
+            const stateTargets = {
+                TX: 50, CA: 45, FL: 35, NY: 25, PA: 20, IL: 18, GA: 16, NC: 15, VA: 12, AZ: 10
+            };
+
+            const currentByState = {{}};
+            engineData.franchisee.performance.forEach(p => {
+                currentByState[p.state] = (currentByState[p.state] || 0) + 1;
+            });
+
+            const currentTotal = Object.values(currentByState).reduce((a, b) => a + b, 0);
+            const targetTotal = Object.values(stateTargets).reduce((a, b) => a + b, 0);
+
+            // Update summary cards
+            const topState = Object.keys(currentByState).sort((a, b) => currentByState[b] - currentByState[a])[0];
+            const gapState = Object.keys(stateTargets).reduce((best, s) => {
+                const gap1 = stateTargets[s] - (currentByState[s] || 0);
+                const gap2 = stateTargets[best] - (currentByState[best] || 0);
+                return gap1 > gap2 ? s : best;
+            });
+
+            document.getElementById('progress-value').textContent = currentTotal + '/100';
+            document.getElementById('progress-pct').textContent = Math.round((currentTotal / 100) * 100) + '% of target';
+            document.getElementById('top-territory').textContent = topState || '—';
+            document.getElementById('top-territory-count').textContent = (currentByState[topState] || 0) + ' centers';
+            document.getElementById('gap-territory').textContent = gapState;
+            document.getElementById('gap-count').textContent = (stateTargets[gapState] - (currentByState[gapState] || 0)) + ' centers needed';
+
+            // Build table
+            const tbody = document.querySelector('#expansion-table tbody');
+            tbody.innerHTML = '';
+            Object.keys(stateTargets).sort().forEach(state => {
+                const current = currentByState[state] || 0;
+                const target = stateTargets[state];
+                const gap = target - current;
+                const pct = Math.round((current / target) * 100);
+                const status = current >= target ? 'complete' : gap <= 5 ? 'on-track' : 'gap';
+                const statusColor = status === 'complete' ? '#2fbf5f' : status === 'on-track' ? '#d9a520' : '#e03535';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${{state}}</strong></td>
+                    <td>${{current}}</td>
+                    <td>${{target}}</td>
+                    <td><strong style="color: ${{gap <= 0 ? '#2fbf5f' : '#e03535'}}">${{gap > 0 ? '−' + gap : '✓'}}</strong></td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <div style="flex: 1; height: 8px; background: #eee; border-radius: 4px; overflow: hidden;">
+                                <div style="width: ${{Math.min(100, pct)}}%; height: 100%; background: ${{pct >= 100 ? '#2fbf5f' : pct >= 80 ? '#d9a520' : '#e03535'}}; border-radius: 4px;"></div>
+                            </div>
+                            <span style="font-size: 0.8em; min-width: 30px;">${{pct}}%</span>
+                        </div>
+                    </td>
+                    <td><strong style="color: ${{statusColor}}; text-transform: capitalize;">${{status}}</strong></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        initExpansion();
     </script>
 </body>
 </html>
