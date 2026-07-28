@@ -1,6 +1,8 @@
-# 🚀 Franchise Engine — Multi-Brand Operations & Governance Platform
+# 🚀 Building Kidz Worldwide — Franchise Operations Engine
 
-A deterministic, schema-driven system for managing 244+ franchise units across multiple brands (CodeNinjas, Building Kidz, and adjacent networks). Real-time health tracking, compliance auditing, program orchestration, and franchise partner support—all queryable, auditable, and deployable with zero backend.
+A deterministic, schema-driven system for managing the Building Kidz franchise network of creative arts and STEM-integrated early childhood education centers. Real-time health tracking, compliance auditing, program orchestration, and franchise partner support—all queryable, auditable, and deployable with zero backend.
+
+**Mission**: Inspire creativity, confidence, and a love of learning in young children through integrated academics and performing arts.
 
 ## Features
 
