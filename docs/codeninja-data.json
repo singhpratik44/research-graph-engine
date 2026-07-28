@@ -1,0 +1,369 @@
+{
+  "brand_name": "CodeNinjas",
+  "created_at": "2026-07-28T19:31:49.051998",
+  "regions": {
+    "ca": {
+      "label": "California",
+      "centers": [
+        {
+          "name": "CodeNinjas San Francisco",
+          "region": "ca",
+          "state": "CA",
+          "address": "123 Market St, SF, CA 94102",
+          "health": 92.0,
+          "enrollment": 145,
+          "staff_count": 8,
+          "conversion_rate": 0.78,
+          "chemistry": 88.0,
+          "revenue_margin": 8.5,
+          "retention": 92.0,
+          "verified": true,
+          "programs": [
+            "coding",
+            "stem"
+          ],
+          "created_at": "2026-07-28T19:31:49.052048"
+        },
+        {
+          "name": "CodeNinjas Los Angeles",
+          "region": "ca",
+          "state": "CA",
+          "address": "456 Wilshire Blvd, LA, CA 90010",
+          "health": 85.0,
+          "enrollment": 112,
+          "staff_count": 6,
+          "conversion_rate": 0.72,
+          "chemistry": 80.0,
+          "revenue_margin": 7.2,
+          "retention": 88.0,
+          "verified": true,
+          "programs": [
+            "coding",
+            "enrichment"
+          ],
+          "created_at": "2026-07-28T19:31:49.052054"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.75,
+        "margin": 7.85,
+        "staffing": 84.0,
+        "community": 90.0
+      }
+    },
+    "tx": {
+      "label": "Texas",
+      "centers": [
+        {
+          "name": "CodeNinjas Austin",
+          "region": "tx",
+          "state": "TX",
+          "address": null,
+          "health": 88.0,
+          "enrollment": 98,
+          "staff_count": 5,
+          "conversion_rate": 0.75,
+          "chemistry": 85.0,
+          "revenue_margin": 7.8,
+          "retention": 90.0,
+          "verified": true,
+          "programs": [
+            "coding"
+          ],
+          "created_at": "2026-07-28T19:31:49.052070"
+        },
+        {
+          "name": "CodeNinjas Houston",
+          "region": "tx",
+          "state": "TX",
+          "address": null,
+          "health": 72.0,
+          "enrollment": 67,
+          "staff_count": 4,
+          "conversion_rate": 0.62,
+          "chemistry": 70.0,
+          "revenue_margin": 5.5,
+          "retention": 78.0,
+          "verified": false,
+          "programs": [
+            "coding"
+          ],
+          "created_at": "2026-07-28T19:31:49.052075"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.685,
+        "margin": 6.65,
+        "staffing": 77.5,
+        "community": 84.0
+      }
+    },
+    "ny": {
+      "label": "New York",
+      "centers": [
+        {
+          "name": "CodeNinjas Manhattan",
+          "region": "ny",
+          "state": "NY",
+          "address": null,
+          "health": 89.0,
+          "enrollment": 134,
+          "staff_count": 7,
+          "conversion_rate": 0.81,
+          "chemistry": 87.0,
+          "revenue_margin": 9.2,
+          "retention": 91.0,
+          "verified": true,
+          "programs": [
+            "coding",
+            "stem",
+            "arts"
+          ],
+          "created_at": "2026-07-28T19:31:49.052081"
+        },
+        {
+          "name": "CodeNinjas Brooklyn",
+          "region": "ny",
+          "state": "NY",
+          "address": null,
+          "health": 58.0,
+          "enrollment": 41,
+          "staff_count": 3,
+          "conversion_rate": 0.55,
+          "chemistry": 62.0,
+          "revenue_margin": 3.8,
+          "retention": 65.0,
+          "verified": false,
+          "programs": [
+            "coding"
+          ],
+          "created_at": "2026-07-28T19:31:49.052084"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.68,
+        "margin": 6.5,
+        "staffing": 74.5,
+        "community": 78.0
+      }
+    },
+    "fl": {
+      "label": "Florida",
+      "centers": [
+        {
+          "name": "CodeNinjas Miami",
+          "region": "fl",
+          "state": "FL",
+          "address": null,
+          "health": 80.0,
+          "enrollment": 87,
+          "staff_count": 5,
+          "conversion_rate": 0.68,
+          "chemistry": 78.0,
+          "revenue_margin": 6.8,
+          "retention": 82.0,
+          "verified": true,
+          "programs": [
+            "coding",
+            "enrichment"
+          ],
+          "created_at": "2026-07-28T19:31:49.052089"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.68,
+        "margin": 6.8,
+        "staffing": 78.0,
+        "community": 82.0
+      }
+    },
+    "co": {
+      "label": "Colorado",
+      "centers": [
+        {
+          "name": "CodeNinjas Denver",
+          "region": "co",
+          "state": "CO",
+          "address": null,
+          "health": 81.0,
+          "enrollment": 105,
+          "staff_count": 6,
+          "conversion_rate": 0.74,
+          "chemistry": 82.0,
+          "revenue_margin": 7.5,
+          "retention": 85.0,
+          "verified": true,
+          "programs": [
+            "coding",
+            "stem"
+          ],
+          "created_at": "2026-07-28T19:31:49.052094"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.74,
+        "margin": 7.5,
+        "staffing": 82.0,
+        "community": 85.0
+      }
+    }
+  },
+  "programs": {
+    "CN-101": {
+      "program_id": "CN-101",
+      "name": "Coding 101: Python Fundamentals",
+      "program_type": "coding",
+      "centers_offering": [
+        "CodeNinjas San Francisco",
+        "CodeNinjas Austin",
+        "CodeNinjas Manhattan"
+      ],
+      "enrollment": 245,
+      "instructor_count": 6,
+      "revenue_contribution": 45000.0
+    },
+    "CN-102": {
+      "program_id": "CN-102",
+      "name": "Web Development Bootcamp",
+      "program_type": "coding",
+      "centers_offering": [
+        "CodeNinjas San Francisco",
+        "CodeNinjas Los Angeles",
+        "CodeNinjas Manhattan"
+      ],
+      "enrollment": 187,
+      "instructor_count": 5,
+      "revenue_contribution": 38000.0
+    },
+    "CN-201": {
+      "program_id": "CN-201",
+      "name": "STEM Robotics Advanced",
+      "program_type": "stem",
+      "centers_offering": [
+        "CodeNinjas San Francisco",
+        "CodeNinjas Denver",
+        "CodeNinjas Manhattan"
+      ],
+      "enrollment": 92,
+      "instructor_count": 4,
+      "revenue_contribution": 22000.0
+    },
+    "CN-301": {
+      "program_id": "CN-301",
+      "name": "Game Development 3D",
+      "program_type": "enrichment",
+      "centers_offering": [
+        "CodeNinjas Los Angeles",
+        "CodeNinjas Miami"
+      ],
+      "enrollment": 68,
+      "instructor_count": 3,
+      "revenue_contribution": 18000.0
+    }
+  },
+  "support_tickets": [
+    {
+      "ticket_id": "TKT-1000",
+      "center_name": "CodeNinjas San Francisco",
+      "category": "marketing",
+      "status": "resolved",
+      "created_at": "2026-07-28T19:31:49.052108",
+      "resolved_at": "2026-07-26T19:31:49.052103",
+      "notes": "Need help with social media strategy for Q3"
+    },
+    {
+      "ticket_id": "TKT-1001",
+      "center_name": "CodeNinjas Houston",
+      "category": "compliance",
+      "status": "in_progress",
+      "created_at": "2026-07-28T19:31:49.052117",
+      "resolved_at": null,
+      "notes": "FDD audit follow-up documentation needed"
+    },
+    {
+      "ticket_id": "TKT-1002",
+      "center_name": "CodeNinjas Brooklyn",
+      "category": "hr",
+      "status": "open",
+      "created_at": "2026-07-28T19:31:49.052119",
+      "resolved_at": null,
+      "notes": "Instructor onboarding process review"
+    },
+    {
+      "ticket_id": "TKT-1003",
+      "center_name": "CodeNinjas Manhattan",
+      "category": "technical",
+      "status": "resolved",
+      "created_at": "2026-07-28T19:31:49.052121",
+      "resolved_at": "2026-07-26T19:31:49.052103",
+      "notes": "Website CMS upgrade required"
+    },
+    {
+      "ticket_id": "TKT-1004",
+      "center_name": "CodeNinjas Denver",
+      "category": "onboarding",
+      "status": "completed",
+      "created_at": "2026-07-28T19:31:49.052125",
+      "resolved_at": "2026-07-26T19:31:49.052103",
+      "notes": "Initial franchise setup documentation"
+    }
+  ],
+  "compliance_records": [
+    {
+      "center_name": "CodeNinjas San Francisco",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-06-15",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    },
+    {
+      "center_name": "CodeNinjas Los Angeles",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-05-20",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    },
+    {
+      "center_name": "CodeNinjas Austin",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-07-01",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    },
+    {
+      "center_name": "CodeNinjas Houston",
+      "fdd_item_20": 244,
+      "verification_status": "flagged",
+      "last_audit": "2024-04-10",
+      "notes": ""
+    },
+    {
+      "center_name": "CodeNinjas Manhattan",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-06-22",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    },
+    {
+      "center_name": "CodeNinjas Brooklyn",
+      "fdd_item_20": 244,
+      "verification_status": "pending",
+      "last_audit": null,
+      "notes": ""
+    },
+    {
+      "center_name": "CodeNinjas Miami",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-07-08",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    },
+    {
+      "center_name": "CodeNinjas Denver",
+      "fdd_item_20": 244,
+      "verification_status": "verified",
+      "last_audit": "2024-06-30",
+      "notes": "Per FDD Item 20: 244 authoritative units"
+    }
+  ]
+}

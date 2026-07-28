@@ -1,0 +1,13 @@
+title: Franchise Engine
+description: Multi-Brand Operations & Governance Platform
+theme: jekyll-theme-cayman
+show_downloads: false
+
+# GitHub Pages configuration for Franchise Engine dashboards
+# Live at: https://singhpratik44.github.io/research-graph-engine/
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"

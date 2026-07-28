@@ -1,0 +1,144 @@
+{
+  "brand_name": "Building Kidz",
+  "created_at": "2026-07-28T19:31:49.053164",
+  "regions": {
+    "mid_atlantic": {
+      "label": "Mid-Atlantic",
+      "centers": [
+        {
+          "name": "Building Kidz DC",
+          "region": "mid_atlantic",
+          "state": "DC",
+          "address": null,
+          "health": 86.0,
+          "enrollment": 76,
+          "staff_count": 5,
+          "conversion_rate": 0.71,
+          "chemistry": 83.0,
+          "revenue_margin": 7.1,
+          "retention": 87.0,
+          "verified": true,
+          "programs": [
+            "arts",
+            "enrichment"
+          ],
+          "created_at": "2026-07-28T19:31:49.053181"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.71,
+        "margin": 7.1,
+        "staffing": 83.0,
+        "community": 87.0
+      }
+    },
+    "southeast": {
+      "label": "Southeast",
+      "centers": [
+        {
+          "name": "Building Kidz Atlanta",
+          "region": "southeast",
+          "state": "GA",
+          "address": null,
+          "health": 82.0,
+          "enrollment": 91,
+          "staff_count": 6,
+          "conversion_rate": 0.69,
+          "chemistry": 81.0,
+          "revenue_margin": 6.9,
+          "retention": 84.0,
+          "verified": true,
+          "programs": [
+            "arts",
+            "enrichment"
+          ],
+          "created_at": "2026-07-28T19:31:49.053184"
+        },
+        {
+          "name": "Building Kidz Charlotte",
+          "region": "southeast",
+          "state": "NC",
+          "address": null,
+          "health": 75.0,
+          "enrollment": 58,
+          "staff_count": 4,
+          "conversion_rate": 0.64,
+          "chemistry": 75.0,
+          "revenue_margin": 5.9,
+          "retention": 76.0,
+          "verified": true,
+          "programs": [
+            "arts"
+          ],
+          "created_at": "2026-07-28T19:31:49.053187"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.665,
+        "margin": 6.4,
+        "staffing": 78.0,
+        "community": 80.0
+      }
+    },
+    "midwest": {
+      "label": "Midwest",
+      "centers": [
+        {
+          "name": "Building Kidz Chicago",
+          "region": "midwest",
+          "state": "IL",
+          "address": null,
+          "health": 84.0,
+          "enrollment": 103,
+          "staff_count": 6,
+          "conversion_rate": 0.7,
+          "chemistry": 84.0,
+          "revenue_margin": 7.2,
+          "retention": 86.0,
+          "verified": true,
+          "programs": [
+            "arts",
+            "stem",
+            "enrichment"
+          ],
+          "created_at": "2026-07-28T19:31:49.053190"
+        }
+      ],
+      "metrics": {
+        "engagement": 0.7,
+        "margin": 7.2,
+        "staffing": 84.0,
+        "community": 86.0
+      }
+    }
+  },
+  "programs": {
+    "BK-101": {
+      "program_id": "BK-101",
+      "name": "Creative Arts Foundation",
+      "program_type": "arts",
+      "centers_offering": [
+        "Building Kidz DC",
+        "Building Kidz Atlanta",
+        "Building Kidz Charlotte",
+        "Building Kidz Chicago"
+      ],
+      "enrollment": 198,
+      "instructor_count": 5,
+      "revenue_contribution": 32000.0
+    },
+    "BK-201": {
+      "program_id": "BK-201",
+      "name": "STEM + Arts Integration",
+      "program_type": "stem",
+      "centers_offering": [
+        "Building Kidz Chicago"
+      ],
+      "enrollment": 45,
+      "instructor_count": 2,
+      "revenue_contribution": 12000.0
+    }
+  },
+  "support_tickets": [],
+  "compliance_records": []
+}
