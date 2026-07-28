@@ -1,0 +1,559 @@
+{
+  "brand_name": "Building Kidz Worldwide",
+  "mission": "Inspire creativity, confidence, and a love of learning in young children through integrated academics and performing arts.",
+  "created_at": "2026-07-28T19:37:04.425097",
+  "regions": {
+    "mid_atlantic": {
+      "label": "Mid-Atlantic (DC, MD, VA)",
+      "centers": [
+        {
+          "name": "Building Kidz \u2014 Washington DC",
+          "region": "mid_atlantic",
+          "state": "DC",
+          "address": "2100 Pennsylvania Ave NW, Washington, DC 20037",
+          "health": 88.0,
+          "total_enrollment": 127,
+          "age_groups_served": 3,
+          "staff_count": 11,
+          "instructor_experience_avg": 6.2,
+          "team_cohesion": 86.0,
+          "enrollment_conversion": 0.76,
+          "average_class_size": 12.5,
+          "parent_satisfaction": 92.0,
+          "instructor_retention": 94.0,
+          "monthly_revenue": 42500.0,
+          "margin_percentage": 18.5,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "performing_arts",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-06-15",
+          "created_at": "2026-07-28T19:37:04.425272"
+        },
+        {
+          "name": "Building Kidz \u2014 Baltimore",
+          "region": "mid_atlantic",
+          "state": "MD",
+          "address": null,
+          "health": 74.0,
+          "total_enrollment": 89,
+          "age_groups_served": 3,
+          "staff_count": 8,
+          "instructor_experience_avg": 4.1,
+          "team_cohesion": 72.0,
+          "enrollment_conversion": 0.68,
+          "average_class_size": 11.0,
+          "parent_satisfaction": 85.0,
+          "instructor_retention": 80.0,
+          "monthly_revenue": 28300.0,
+          "margin_percentage": 14.2,
+          "programs_offered": [
+            "creative_arts_foundation"
+          ],
+          "verified": true,
+          "last_audit": "2024-05-20",
+          "created_at": "2026-07-28T19:37:04.425281"
+        }
+      ],
+      "metrics": {
+        "enrollment_conversion": 0.72,
+        "parent_satisfaction": 88.5,
+        "team_cohesion": 79.0,
+        "instructor_retention": 87.0
+      }
+    },
+    "southeast": {
+      "label": "Southeast (GA, NC, SC)",
+      "centers": [
+        {
+          "name": "Building Kidz \u2014 Atlanta",
+          "region": "southeast",
+          "state": "GA",
+          "address": null,
+          "health": 82.0,
+          "total_enrollment": 145,
+          "age_groups_served": 3,
+          "staff_count": 13,
+          "instructor_experience_avg": 5.8,
+          "team_cohesion": 84.0,
+          "enrollment_conversion": 0.73,
+          "average_class_size": 13.0,
+          "parent_satisfaction": 89.0,
+          "instructor_retention": 88.0,
+          "monthly_revenue": 48900.0,
+          "margin_percentage": 17.8,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "stem_integration",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-07-01",
+          "created_at": "2026-07-28T19:37:04.425289"
+        },
+        {
+          "name": "Building Kidz \u2014 Charlotte",
+          "region": "southeast",
+          "state": "NC",
+          "address": null,
+          "health": 76.0,
+          "total_enrollment": 103,
+          "age_groups_served": 3,
+          "staff_count": 9,
+          "instructor_experience_avg": 3.5,
+          "team_cohesion": 75.0,
+          "enrollment_conversion": 0.65,
+          "average_class_size": 11.5,
+          "parent_satisfaction": 83.0,
+          "instructor_retention": 82.0,
+          "monthly_revenue": 34700.0,
+          "margin_percentage": 15.1,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-06-10",
+          "created_at": "2026-07-28T19:37:04.425293"
+        },
+        {
+          "name": "Building Kidz \u2014 Charleston",
+          "region": "southeast",
+          "state": "SC",
+          "address": null,
+          "health": 58.0,
+          "total_enrollment": 62,
+          "age_groups_served": 3,
+          "staff_count": 6,
+          "instructor_experience_avg": 2.3,
+          "team_cohesion": 62.0,
+          "enrollment_conversion": 0.52,
+          "average_class_size": 9.5,
+          "parent_satisfaction": 75.0,
+          "instructor_retention": 68.0,
+          "monthly_revenue": 18500.0,
+          "margin_percentage": 8.5,
+          "programs_offered": [
+            "creative_arts_foundation"
+          ],
+          "verified": false,
+          "last_audit": "2024-03-15",
+          "created_at": "2026-07-28T19:37:04.425296"
+        }
+      ],
+      "metrics": {
+        "enrollment_conversion": 0.6333333333333333,
+        "parent_satisfaction": 82.33333333333333,
+        "team_cohesion": 73.66666666666667,
+        "instructor_retention": 79.33333333333333
+      }
+    },
+    "midwest": {
+      "label": "Midwest (IL, MI, OH)",
+      "centers": [
+        {
+          "name": "Building Kidz \u2014 Chicago",
+          "region": "midwest",
+          "state": "IL",
+          "address": null,
+          "health": 86.0,
+          "total_enrollment": 156,
+          "age_groups_served": 3,
+          "staff_count": 14,
+          "instructor_experience_avg": 6.7,
+          "team_cohesion": 87.0,
+          "enrollment_conversion": 0.75,
+          "average_class_size": 13.5,
+          "parent_satisfaction": 91.0,
+          "instructor_retention": 92.0,
+          "monthly_revenue": 51200.0,
+          "margin_percentage": 19.2,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "performing_arts",
+            "stem_integration",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-07-08",
+          "created_at": "2026-07-28T19:37:04.425300"
+        },
+        {
+          "name": "Building Kidz \u2014 Ann Arbor",
+          "region": "midwest",
+          "state": "MI",
+          "address": null,
+          "health": 79.0,
+          "total_enrollment": 95,
+          "age_groups_served": 3,
+          "staff_count": 9,
+          "instructor_experience_avg": 4.4,
+          "team_cohesion": 78.0,
+          "enrollment_conversion": 0.7,
+          "average_class_size": 12.0,
+          "parent_satisfaction": 87.0,
+          "instructor_retention": 85.0,
+          "monthly_revenue": 32100.0,
+          "margin_percentage": 16.3,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-06-22",
+          "created_at": "2026-07-28T19:37:04.425304"
+        }
+      ],
+      "metrics": {
+        "enrollment_conversion": 0.725,
+        "parent_satisfaction": 89.0,
+        "team_cohesion": 82.5,
+        "instructor_retention": 88.5
+      }
+    },
+    "southwest": {
+      "label": "Southwest (TX, AZ)",
+      "centers": [
+        {
+          "name": "Building Kidz \u2014 Austin",
+          "region": "southwest",
+          "state": "TX",
+          "address": null,
+          "health": 84.0,
+          "total_enrollment": 138,
+          "age_groups_served": 3,
+          "staff_count": 12,
+          "instructor_experience_avg": 5.5,
+          "team_cohesion": 83.0,
+          "enrollment_conversion": 0.74,
+          "average_class_size": 12.8,
+          "parent_satisfaction": 90.0,
+          "instructor_retention": 89.0,
+          "monthly_revenue": 46800.0,
+          "margin_percentage": 18.1,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "stem_integration",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-07-05",
+          "created_at": "2026-07-28T19:37:04.425309"
+        },
+        {
+          "name": "Building Kidz \u2014 Phoenix",
+          "region": "southwest",
+          "state": "AZ",
+          "address": null,
+          "health": 72.0,
+          "total_enrollment": 81,
+          "age_groups_served": 3,
+          "staff_count": 7,
+          "instructor_experience_avg": 3.2,
+          "team_cohesion": 70.0,
+          "enrollment_conversion": 0.62,
+          "average_class_size": 11.0,
+          "parent_satisfaction": 80.0,
+          "instructor_retention": 76.0,
+          "monthly_revenue": 27500.0,
+          "margin_percentage": 12.8,
+          "programs_offered": [
+            "creative_arts_foundation"
+          ],
+          "verified": true,
+          "last_audit": "2024-04-30",
+          "created_at": "2026-07-28T19:37:04.425318"
+        }
+      ],
+      "metrics": {
+        "enrollment_conversion": 0.6799999999999999,
+        "parent_satisfaction": 85.0,
+        "team_cohesion": 76.5,
+        "instructor_retention": 82.5
+      }
+    },
+    "west_coast": {
+      "label": "West Coast (CA, WA)",
+      "centers": [
+        {
+          "name": "Building Kidz \u2014 San Francisco Bay Area",
+          "region": "west_coast",
+          "state": "CA",
+          "address": null,
+          "health": 87.0,
+          "total_enrollment": 142,
+          "age_groups_served": 3,
+          "staff_count": 13,
+          "instructor_experience_avg": 6.1,
+          "team_cohesion": 85.0,
+          "enrollment_conversion": 0.77,
+          "average_class_size": 13.2,
+          "parent_satisfaction": 93.0,
+          "instructor_retention": 91.0,
+          "monthly_revenue": 49700.0,
+          "margin_percentage": 19.5,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "performing_arts",
+            "stem_integration"
+          ],
+          "verified": true,
+          "last_audit": "2024-07-12",
+          "created_at": "2026-07-28T19:37:04.425322"
+        },
+        {
+          "name": "Building Kidz \u2014 Seattle",
+          "region": "west_coast",
+          "state": "WA",
+          "address": null,
+          "health": 80.0,
+          "total_enrollment": 112,
+          "age_groups_served": 3,
+          "staff_count": 10,
+          "instructor_experience_avg": 5.0,
+          "team_cohesion": 81.0,
+          "enrollment_conversion": 0.71,
+          "average_class_size": 12.0,
+          "parent_satisfaction": 88.0,
+          "instructor_retention": 86.0,
+          "monthly_revenue": 38200.0,
+          "margin_percentage": 16.9,
+          "programs_offered": [
+            "creative_arts_foundation",
+            "enrichment_workshops"
+          ],
+          "verified": true,
+          "last_audit": "2024-06-28",
+          "created_at": "2026-07-28T19:37:04.425325"
+        }
+      ],
+      "metrics": {
+        "enrollment_conversion": 0.74,
+        "parent_satisfaction": 90.5,
+        "team_cohesion": 83.0,
+        "instructor_retention": 88.5
+      }
+    }
+  },
+  "programs": {
+    "BK-101": {
+      "program_id": "BK-101",
+      "name": "Creative Arts Foundation",
+      "program_type": "creative_arts_foundation",
+      "age_groups": [
+        "Toddler",
+        "Preschool",
+        "PreK"
+      ],
+      "centers_offering": [
+        "Building Kidz \u2014 Washington DC",
+        "Building Kidz \u2014 Baltimore",
+        "Building Kidz \u2014 Atlanta",
+        "Building Kidz \u2014 Charlotte",
+        "Building Kidz \u2014 Charleston",
+        "Building Kidz \u2014 Chicago",
+        "Building Kidz \u2014 Ann Arbor",
+        "Building Kidz \u2014 Austin",
+        "Building Kidz \u2014 Phoenix",
+        "Building Kidz \u2014 San Francisco Bay Area",
+        "Building Kidz \u2014 Seattle"
+      ],
+      "total_enrollment": 1015,
+      "instructor_count": 93,
+      "monthly_revenue": 320000.0
+    },
+    "BK-201": {
+      "program_id": "BK-201",
+      "name": "Performing Arts Integration",
+      "program_type": "performing_arts",
+      "age_groups": [
+        "Preschool",
+        "PreK"
+      ],
+      "centers_offering": [
+        "Building Kidz \u2014 Washington DC",
+        "Building Kidz \u2014 Chicago",
+        "Building Kidz \u2014 San Francisco Bay Area"
+      ],
+      "total_enrollment": 187,
+      "instructor_count": 18,
+      "monthly_revenue": 58000.0
+    },
+    "BK-301": {
+      "program_id": "BK-301",
+      "name": "STEM Integration Workshop",
+      "program_type": "stem_integration",
+      "age_groups": [
+        "Preschool",
+        "PreK"
+      ],
+      "centers_offering": [
+        "Building Kidz \u2014 Atlanta",
+        "Building Kidz \u2014 Chicago",
+        "Building Kidz \u2014 Austin",
+        "Building Kidz \u2014 San Francisco Bay Area"
+      ],
+      "total_enrollment": 142,
+      "instructor_count": 16,
+      "monthly_revenue": 43000.0
+    },
+    "BK-401": {
+      "program_id": "BK-401",
+      "name": "Enrichment Workshops",
+      "program_type": "enrichment_workshops",
+      "age_groups": [
+        "Toddler",
+        "Preschool",
+        "PreK"
+      ],
+      "centers_offering": [
+        "Building Kidz \u2014 Washington DC",
+        "Building Kidz \u2014 Charlotte",
+        "Building Kidz \u2014 Chicago",
+        "Building Kidz \u2014 Ann Arbor",
+        "Building Kidz \u2014 Austin",
+        "Building Kidz \u2014 Seattle"
+      ],
+      "total_enrollment": 268,
+      "instructor_count": 28,
+      "monthly_revenue": 82000.0
+    }
+  },
+  "support_tickets": [
+    {
+      "ticket_id": "BK-1000",
+      "center_name": "Building Kidz \u2014 Washington DC",
+      "category": "curriculum",
+      "status": "resolved",
+      "created_at": "2026-07-28T19:37:04.425399",
+      "resolved_at": "2026-07-25T19:37:04.425345",
+      "notes": "Need resources for seasonal arts integration"
+    },
+    {
+      "ticket_id": "BK-1001",
+      "center_name": "Building Kidz \u2014 Baltimore",
+      "category": "staff",
+      "status": "in_progress",
+      "created_at": "2026-07-28T19:37:04.425422",
+      "resolved_at": null,
+      "notes": "Instructor development workshop needed"
+    },
+    {
+      "ticket_id": "BK-1002",
+      "center_name": "Building Kidz \u2014 Charleston",
+      "category": "operations",
+      "status": "open",
+      "created_at": "2026-07-28T19:37:04.425425",
+      "resolved_at": null,
+      "notes": "Enrollment marketing strategy review"
+    },
+    {
+      "ticket_id": "BK-1003",
+      "center_name": "Building Kidz \u2014 Chicago",
+      "category": "technology",
+      "status": "resolved",
+      "created_at": "2026-07-28T19:37:04.425427",
+      "resolved_at": "2026-07-23T19:37:04.425345",
+      "notes": "Platform update for registration system"
+    },
+    {
+      "ticket_id": "BK-1004",
+      "center_name": "Building Kidz \u2014 Austin",
+      "category": "compliance",
+      "status": "open",
+      "created_at": "2026-07-28T19:37:04.425431",
+      "resolved_at": null,
+      "notes": "Updated FDD documentation review"
+    },
+    {
+      "ticket_id": "BK-1005",
+      "center_name": "Building Kidz \u2014 Phoenix",
+      "category": "curriculum",
+      "status": "in_progress",
+      "created_at": "2026-07-28T19:37:04.425433",
+      "resolved_at": null,
+      "notes": "STEM program expansion consultation"
+    }
+  ],
+  "compliance_records": [
+    {
+      "center_name": "Building Kidz \u2014 Washington DC",
+      "verification_status": "verified",
+      "last_audit": "2024-06-15",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Baltimore",
+      "verification_status": "verified",
+      "last_audit": "2024-05-20",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Atlanta",
+      "verification_status": "verified",
+      "last_audit": "2024-07-01",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Charlotte",
+      "verification_status": "verified",
+      "last_audit": "2024-06-10",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Charleston",
+      "verification_status": "flagged",
+      "last_audit": "2024-03-15",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Remediation in progress"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Chicago",
+      "verification_status": "verified",
+      "last_audit": "2024-07-08",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Ann Arbor",
+      "verification_status": "verified",
+      "last_audit": "2024-06-22",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Austin",
+      "verification_status": "verified",
+      "last_audit": "2024-07-05",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Phoenix",
+      "verification_status": "verified",
+      "last_audit": "2024-04-30",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 San Francisco Bay Area",
+      "verification_status": "verified",
+      "last_audit": "2024-07-12",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    },
+    {
+      "center_name": "Building Kidz \u2014 Seattle",
+      "verification_status": "verified",
+      "last_audit": "2024-06-28",
+      "fdd_item_details": "Building Kidz franchise operations verified under FDD Item 20",
+      "notes": "Full compliance audit completed"
+    }
+  ]
+}
